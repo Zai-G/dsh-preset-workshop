@@ -1,0 +1,4 @@
+- insert:
+    - id: preset-workshop
+      name: dsh-preset-workshop
+      config: {}
