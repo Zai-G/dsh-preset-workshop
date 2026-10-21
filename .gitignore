@@ -1,0 +1,12 @@
+node_modules/
+artifacts/
+*.tgz
+.DS_Store
+coverage/
+*.log
+.env
+.env.*
+!.env.example
+.npmrc
+*.pem
+*.key

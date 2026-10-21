@@ -1,0 +1,63 @@
+{
+  "name": "dsh-preset-workshop",
+  "version": "0.1.0",
+  "description": "Preset Workshop · 预设工坊：让您的每一个Agent都有自己的工作方式",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Zai-G/dsh-preset-workshop.git"
+  },
+  "homepage": "https://github.com/Zai-G/dsh-preset-workshop#readme",
+  "bugs": {
+    "url": "https://github.com/Zai-G/dsh-preset-workshop/issues"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "dsh-plugin",
+    "preset",
+    "agent",
+    "prompt"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    ".": "./src/index.js",
+    "./scope": "./src/scope.js",
+    "./client": "./src/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "cordis.patch.yml",
+    "README.md",
+    "assets"
+  ],
+  "scripts": {
+    "check": "node --check src/index.js && node --check src/scope.js && node --check src/core.js && node --check src/store.js && node --check src/catalog.js && node --check src/client.js",
+    "test": "node --test test/core.test.mjs test/client.test.mjs"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.4",
+    "@deepseek-ai/dsh-scope": "0.2.0-rc.2"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "slots",
+        "locale"
+      ],
+      "platform": "web",
+      "immediately": true
+    }
+  },
+  "icon": "assets/color.png"
+}
