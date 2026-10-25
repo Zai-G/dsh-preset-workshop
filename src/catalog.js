@@ -2,15 +2,15 @@ import { createRequire } from 'node:module';
 import { readdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { createScope, scopeOf } from '@deepseek-ai/dsh-scope';
-import { BUILTINS, functionSchema, fail } from './core.js';
+import { BUILTINS, MCP_CLIENT_MODULE, functionSchema, sameToolSchema, fail } from './core.js';
 import { atomicJSON, readJSON } from './store.js';
 import { mountRows } from './scope.js';
 
 const PREFIX = '@deepseek-ai/dsh-tool-';
 // Unknown packages stay declaration-driven until their owner classifies them as lightweight.
-const LIGHT = new Set([...Object.values(BUILTINS), 'subagent', 'fs-search', 'jobs', 'skill', 'present']);
+const LIGHT = new Set([...Object.values(BUILTINS), 'subagent', 'fs-search', 'jobs', 'skill', 'present', 'working-directory']);
 export class ToolCatalog {
-  constructor(ctx, root) { this.ctx = ctx; this.root = root; this.tools = []; this.packages = []; this.scannedAt = null; }
+  constructor(ctx, root) { this.ctx = ctx; this.root = root; this.tools = []; this.packages = []; this.mcpServers = []; this.scannedAt = null; }
   async scan() {
     const templates = new Map();
     const names = new Set(Object.values(BUILTINS).map(name => PREFIX + name));
@@ -49,7 +49,10 @@ export class ToolCatalog {
     const known = await readJSON(join(this.root, 'catalog.json'), { tools: [] });
     const byName = new Map(known.tools.map(tool => [tool.name, { ...tool, available: false }]));
     const packages = [];
-    for (const name of [...names].sort()) {
+    const orderedNames = [...names].sort(), results = new Array(orderedNames.length);
+    const baseline = this.ctx.systemPrompt?.assemble ? await this.ctx.systemPrompt.assemble() : undefined;
+    let cursor = 0;
+    const inspect = async name => {
       const light = LIGHT.has(name.slice(PREFIX.length));
       const candidates = [...(templates.get(name)?.values() ?? [{ row: { id: 'tool-' + name.slice(PREFIX.length), name, config: {} }, parents: [] }])].sort((a, b) => b.parents.length - a.parents.length);
       for (const candidate of candidates) if (typeof candidate.row.disabled === 'boolean') delete candidate.row.disabled;
@@ -59,24 +62,34 @@ export class ToolCatalog {
       // alone cannot prove that Bash/PowerShell matches the platform executor.
       const incompatibleShell = process.platform === 'win32' ? /^@deepseek-ai\/dsh-tool-bash(?:-persistent)?$/ : /^@deepseek-ai\/dsh-tool-pwsh(?:-persistent)?$/;
       if (incompatibleShell.test(name)) {
-        packages.push({ name, light, available: false, row, error: 'This shell tool does not match the host platform executor' });
-        continue;
+        return { name, light, available: false, row, error: 'This shell tool does not match the host platform executor' };
       }
       try { await this.ctx.loader.root.tree.import(name); }
       catch (error) {
-        packages.push({ name, light, available: false, row, error: error.message });
-        continue;
+        return { name, light, available: false, row, error: error.message };
       }
       const pkg = { name, light, available: true, row, parents: template.parents, candidates, tools: [...byName.values()].filter(tool => tool.package === name).map(tool => tool.name) };
       if (light) {
         try {
-          for (const tool of await this.discover(pkg)) byName.set(tool.name, tool);
+          await this.discover(pkg, baseline);
         } catch (error) { pkg.error = error.message; }
       }
+      return pkg;
+    };
+    await Promise.all(Array.from({ length: Math.min(4, orderedNames.length) }, async () => {
+      while (true) {
+        const index = cursor++;
+        if (index >= orderedNames.length) return;
+        results[index] = await inspect(orderedNames[index]);
+      }
+    }));
+    for (const pkg of results) {
+      for (const tool of pkg.entries ?? []) byName.set(tool.name, tool);
       packages.push(pkg);
     }
     this.tools = [...byName.values()];
     this.syncGlobalTools();
+    byName.clear();
     for (const tool of this.tools) byName.set(tool.name, tool);
     for (const [name, suffix] of Object.entries(BUILTINS)) {
       if (name === (process.platform === 'win32' ? 'bash' : 'pwsh')) continue;
@@ -91,14 +104,33 @@ export class ToolCatalog {
   // Registration can finish after startup. Follow the unrestricted host registry,
   // without re-probing packages or taking another automatic scan.
   syncGlobalTools() {
-    const byName = new Map(this.tools.map(tool => [tool.name, tool.kind === 'thirdparty' ? { ...tool, available: false } : tool]));
+    const previousServers = JSON.stringify(this.mcpServers);
+    const mcpConfigs = new Map();
+    for (const entry of this.ctx.loader.entries()) {
+      if (scopeOf(entry.parent.tree.ctx) || entry.disabled || entry.fiber?.state !== 2 || entry.options.name !== MCP_CLIENT_MODULE) continue;
+      const config = entry.options.config;
+      if (config?.serverName) mcpConfigs.set(config.serverName, config);
+    }
+    this.mcpConfigs = mcpConfigs;
+    this.mcpServers = [...mcpConfigs.values()].map(config => ({ serverName: config.serverName, transport: config.transport, source: 'global' })).sort((a, b) => a.serverName.localeCompare(b.serverName));
+    const byName = new Map(this.tools.filter(tool => tool.kind !== 'thirdparty' && (tool.kind !== 'mcp' || mcpConfigs.has(tool.mcpServer))).map(tool => [tool.name, tool.kind === 'mcp' ? { ...tool, available: false } : tool]));
     for (const schema of this.ctx.tools.schemas()) {
       if (schema.name === 'run_code') continue;
       const knownTool = byName.get(schema.name);
-      byName.set(schema.name, { ...knownTool, name: schema.name, kind: knownTool?.package ? knownTool.kind : 'thirdparty', light: knownTool?.light ?? true, available: true, schema: functionSchema(schema), sections: knownTool?.sections ?? ['tool:' + schema.name], prompt: knownTool?.prompt ?? '' });
+      const mcp = schema.name.startsWith('mcp__')
+        ? this.mcpServers.filter(server => schema.name.startsWith(`mcp__${server.serverName}__`)).sort((a, b) => b.serverName.length - a.serverName.length)[0]
+        : undefined;
+      const resource = ['list_mcp_resources', 'list_mcp_resource_templates', 'read_mcp_resource'].includes(schema.name);
+      const isMcp = Boolean(mcp || schema.name.startsWith('mcp__'));
+      const current = functionSchema(schema);
+      const packageName = knownTool?.package;
+      // A late third-party registration must not replace a known official
+      // executor just because it uses the same public tool name.
+      if (knownTool && !['thirdparty', 'mcp'].includes(knownTool.kind) && (!knownTool.schema || !sameToolSchema(knownTool.schema, current))) continue;
+      byName.set(schema.name, { ...knownTool, name: schema.name, kind: isMcp ? 'mcp' : resource ? 'official' : packageName ? knownTool?.kind ?? 'thirdparty' : 'thirdparty', mcpServer: mcp?.serverName, package: resource ? knownTool?.package ?? '@deepseek-ai/dsh-mcp-resources' : packageName, light: knownTool?.light ?? true, available: true, schema: current, sections: knownTool?.sections ?? ['tool:' + schema.name], prompt: knownTool?.prompt ?? '' });
     }
     const next = [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
-    const changed = JSON.stringify(next) !== JSON.stringify(this.tools);
+    const changed = JSON.stringify(next) !== JSON.stringify(this.tools) || previousServers !== JSON.stringify(this.mcpServers);
     this.tools = next;
     return changed;
   }
@@ -122,13 +154,14 @@ export class ToolCatalog {
     }
     return flatten(rows);
   }
-  async discover(pkg) {
+  async discover(pkg, baseline) {
     const tools = new Map();
     const accepted = [];
     const errors = [];
+    baseline ??= await this.ctx.systemPrompt.assemble();
     for (const candidate of pkg.candidates ?? [pkg]) {
       try {
-        const found = await this.probe({ ...pkg, ...candidate, templates: undefined });
+        const found = await this.probe({ ...pkg, ...candidate, templates: undefined }, baseline);
         if (!found.length || found.some(tool => tools.has(tool.name))) continue;
         accepted.push(candidate);
         for (const tool of found) tools.set(tool.name, tool);
@@ -145,13 +178,12 @@ export class ToolCatalog {
     delete pkg.error;
     return [...tools.values()];
   }
-  async probe(pkg) {
+  async probe(pkg, baseline) {
     const key = {};
     const scope = createScope(this.ctx, key);
     try {
       await mountRows(scope.ctx, this.rows([pkg]));
       const assembly = await this.ctx.systemPrompt.assemble({ scope: key });
-      const baseline = await this.ctx.systemPrompt.assemble();
       const ownSections = assembly.sections.filter(s => !baseline.sections.some(b => b.name === s.name && b.text === s.text));
       const tools = [];
       for (const schema of this.ctx.tools.schemas(key)) {

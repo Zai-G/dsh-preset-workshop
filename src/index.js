@@ -4,13 +4,18 @@ import { homedir } from 'node:os';
 import { readFile, stat } from 'node:fs/promises';
 import { join, resolve, isAbsolute } from 'node:path';
 import { createHash } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import yaml from 'js-yaml';
 import { WorkshopStore } from './store.js';
 import { ToolCatalog } from './catalog.js';
-import { BUILTIN_ID, PERSONA_SECTIONS, AGENT_SECTION, DIRECTORY_AGENT, TOOL_GUIDANCE, newPreset, fail, validatePreset, selectedBinding, functionSchema, sameToolSchema, record } from './core.js';
+import { BUILTIN_ID, PERSONA_SECTIONS, AGENT_SECTION, DIRECTORY_AGENT, TOOL_GUIDANCE, TIME_CONTEXT, MCP_CLIENT_MODULE, newPreset, fail, validatePreset, selectedBinding, functionSchema, sameToolSchema, record, filterMcpSections, isLegacyCwdSection } from './core.js';
 import { mountRows } from './scope.js';
+import { probeMcp } from './mcp.js';
 
 export const inject = ['loader', 'agentPresets', 'tools', 'systemPrompt', 'skills', 'agents', 'sessions', 'sessionProjections'];
+const MAX_PAYLOAD_BYTES = 8 * 1024 * 1024;
+// JSON may escape each text byte as six bytes (for example a YAML tab).
+const MAX_REQUEST_BYTES = MAX_PAYLOAD_BYTES * 6 + 64 * 1024;
 export function apply(ctx) {
   const workshop = new PresetWorkshop(ctx);
   // Start after this Host row settles: preset diagnostics may await the Host loader.
@@ -55,8 +60,10 @@ export class PresetWorkshop extends Service {
     this.registrations = new Map();
     this.definitions = new Map();
     this.currentScopes = new Map();
+    this.retired = new Map();
     this.previewPolicies = new WeakMap();
     this.scopes = new Map();
+    this.mcpStates = new Map();
     this.agents = new Map();
     this.warnings = [];
     this.sourceFunctionIds = new WeakMap();
@@ -73,6 +80,7 @@ export class PresetWorkshop extends Service {
     this.fileReferencePrompt = (await this.ctx.loader.root.tree.import('@deepseek-ai/dsh-file-reference')).FILE_REFERENCE_PROMPT;
     this.createUserMessage = (await this.ctx.loader.root.tree.import('@deepseek-ai/dsh-llm')).createUserMessage;
     this.skillModule = await this.ctx.loader.root.tree.import('@deepseek-ai/dsh-tool-skill');
+    this.timeModule = await this.ctx.loader.root.tree.import('@deepseek-ai/dsh-time-context');
     this.homePaths = await this.ctx.loader.root.tree.import('@deepseek-ai/dsh-home-paths');
     try { this.instructions = await this.ctx.loader.root.tree.import('@deepseek-ai/dsh-agent-instructions'); }
     catch { this.warnings.push({ code: 'instructions-unavailable', detail: 'The host does not provide workspace instructions' }); }
@@ -87,6 +95,7 @@ export class PresetWorkshop extends Service {
     if (!p) fail('preset-not-found', `Unknown preset: ${id}`, 404);
     return p;
   }
+  workingDirectory(session) { return this.ctx.get('workingDirectory')?.get(session) ?? session.header.cwd ?? homedir(); }
   async registerAll() {
     for (const preset of this.store.state.presets) if (preset.enabled && !this.stopping) {
       try { await this.register(preset); }
@@ -108,11 +117,15 @@ export class PresetWorkshop extends Service {
       isolate: { skills: true },
       config: [
         { id: 'registry', name: '@deepseek-ai/dsh-skill', config: {} },
-        { id: 'binding', name: new URL('./scope.js', import.meta.url).href, config: { preset } },
+        { id: 'binding', name: new URL('./scope.js', import.meta.url).href, config: { preset: JSON.stringify(preset) } },
         // Skill tools must resolve the filtered registry in this same realm.
         ...(skillPackage ? [{ ...structuredClone(skillPackage.row), id: 'skill-tool' }] : []),
       ],
     });
+    for (const server of preset.mcp ?? []) if (server.enabled !== false) {
+      const { enabled, ...config } = server;
+      rows.push({ id: `workshop-mcp-${server.serverName}`, name: new URL('./mcp.js', import.meta.url).href, config });
+    }
     return { id: preset.id, name: preset.name, description: preset.description, order: 100, plugins: rows };
   }
   async register(preset) {
@@ -162,14 +175,49 @@ export class PresetWorkshop extends Service {
     }
     return this.scopeRecord(scope)?.catalog ?? this.catalog.forPreset(policy);
   }
+  mcpServerForTool(name, preset) {
+    return [...(this.catalog.mcpServers ?? []), ...(preset.mcp ?? [])]
+      .filter(server => name.startsWith(`mcp__${server.serverName}__`))
+      .sort((a, b) => b.serverName.length - a.serverName.length)[0];
+  }
+  mcpServerEnabled(preset, serverName) {
+    const server = (preset.mcp ?? []).find(item => item.serverName === serverName);
+    return server ? server.enabled !== false : preset.mcpEnabled?.[serverName] !== false;
+  }
+  assertMcpNames(preset) {
+    const global = new Set((this.catalog.mcpServers ?? []).map(server => server.serverName));
+    for (const server of preset.mcp ?? []) if (global.has(server.serverName)) fail('duplicate-mcp', `MCP serverName: ${server.serverName} is already provided by the environment`);
+  }
+  assertMcpToolSelections(preset) {
+    for (const name of preset.tools.enabled) {
+      const server = this.mcpServerForTool(name, preset);
+      if (server && !this.mcpServerEnabled(preset, server.serverName)) fail('mcp-disabled', `MCP server ${server.serverName} is disabled; enable the server before selecting its tools`);
+    }
+  }
   toolSourceMatches(name, scope, policy) {
     const wanted = this.catalog.forPreset(policy).find(tool => tool.name === name);
     const actual = (this.scopeRecord(scope)?.catalog ?? this.catalog.tools).find(tool => tool.name === name);
     const schema = this.ctx.tools.schemas(scope).find(tool => tool.name === name);
+    const connection = value => value && Object.fromEntries(Object.entries(value).filter(([key]) => key !== 'enabled'));
+    if (name.startsWith('mcp__')) {
+      const server = this.mcpServerForTool(name, policy);
+      const mountedPolicy = this.scopePolicy(scope);
+      const mountedServer = this.mcpServerForTool(name, mountedPolicy ?? {});
+      const desired = policy.mcp.find(item => item.serverName === server?.serverName);
+      const mounted = mountedPolicy?.mcp.find(item => item.serverName === mountedServer?.serverName);
+      return Boolean(schema) && isDeepStrictEqual(connection(desired), connection(mounted));
+    }
+    if (['list_mcp_resources', 'list_mcp_resource_templates', 'read_mcp_resource'].includes(name)) {
+      const connections = preset => (preset?.mcp ?? []).filter(server => server.enabled !== false).map(connection).sort((a, b) => a.serverName.localeCompare(b.serverName));
+      if (!isDeepStrictEqual(connections(policy), connections(this.scopePolicy(scope)))) return false;
+    }
     return wanted?.package === actual?.package && (!wanted?.schema || sameToolSchema(wanted.schema, schema ? functionSchema(schema) : actual?.schema));
   }
   effectivePolicy(policy, scope) {
-    const enabled = new Set(policy.tools.enabled.filter(name => this.toolSourceMatches(name, scope, policy)));
+    const enabled = new Set(policy.tools.enabled.filter(name => {
+      const server = this.mcpServerForTool(name, policy);
+      return (!server || this.mcpServerEnabled(policy, server.serverName)) && this.toolSourceMatches(name, scope, policy);
+    }));
     for (const tool of this.ctx.tools.schemas(scope)) {
       const known = this.catalog.forPreset(policy).find(t => t.name === tool.name);
       if (known && !known.light && policy.tools.packages.includes(known.package) && this.toolSourceMatches(tool.name, scope, policy)) enabled.add(tool.name);
@@ -182,8 +230,18 @@ export class PresetWorkshop extends Service {
     const old = this.agents.get(agent);
     const parent = scopeParentOf(agent);
     const owner = !old && this.ctx.agents.list().find(candidate => this.ctx.agents.isOwnedBy(agent.id, candidate) && scopeParentOf(candidate) === parent);
+    const retiredFallback = this.retired.get(binding);
+    if (retiredFallback && this.isBlank(agent)) {
+      try { await this.ctx.agentPresets.select(agent, retiredFallback); }
+      catch (error) {
+        if (error.code === 'agent-preset/locked') agent.session.append('agent-preset/selected', { agentPreset: retiredFallback });
+        else throw error;
+      }
+      await this.ctx.sessions.flush(agent.session);
+    }
     const policy = this.store.state.presets.find(p => p.id === binding && p.enabled)
-      ?? this.agents.get(owner)?.policy ?? old?.policy ?? source;
+      ?? (retiredFallback && this.store.state.presets.find(p => p.id === retiredFallback && p.enabled))
+      ?? this.agents.get(owner)?.policy ?? source;
     if (!policy) { old?.dispose?.(); this.agents.delete(agent); return; }
     const wanted = this.effectivePolicy(policy, parent);
     const known = new Set(this.ctx.tools.schemas(parent).map(tool => tool.name));
@@ -237,13 +295,16 @@ export class PresetWorkshop extends Service {
     return { skills, complete };
   }
   async sourceSkillCatalog(cwd, signal) {
-    const global = await this.ctx.skills.snapshot({ cwd, signal });
+    const [global, roster] = await Promise.all([this.ctx.skills.snapshot({ cwd, signal }), this.ctx.agentPresets.list()]);
     let complete = global.complete;
     const skills = new Map(global.skills.map(skill => [skill.name, skill]));
     const owners = new Map();
-    for (const row of await this.ctx.agentPresets.list()) {
-      if (this.ownsPreset(row.id) || row.broken) continue;
-      const source = await this.withSourceRegistry(row.id, async (registry, scope) => ({ ...await registry.snapshot({ cwd, scope, signal }), shared: registry.layers === this.ctx.skills.layers }));
+    const rows = roster.filter(row => !this.ownsPreset(row.id) && !row.broken);
+    const results = await Promise.allSettled(rows.map(row => this.withSourceRegistry(row.id, async (registry, scope) => ({ ...await registry.snapshot({ cwd, scope, signal }), shared: registry.layers === this.ctx.skills.layers }))));
+    for (const [index, result] of results.entries()) {
+      signal?.throwIfAborted();
+      if (result.status === 'rejected') { complete = false; this.ctx.logger.warn(`Preset Workshop skills (${rows[index].id}): ${result.reason.message}`); continue; }
+      const row = rows[index], source = result.value;
       complete &&= source.complete;
       for (const skill of source.skills) {
         // A native preset's filesystem provider shadows the host layer (for
@@ -298,14 +359,23 @@ export class PresetWorkshop extends Service {
     const row = [...this.ownerCtx.loader.entries()].find(entry => entry.options.name === '@deepseek-ai/dsh-agent-instructions' && !entry.id.includes('workshop-agent-instructions'));
     return { maxBytes: 65536, ...row?.options.config };
   }
+  globalInstructionPaths() {
+    const dshHome = this.homePaths.resolveDshHome(this.homePaths.resolveAgentsHome ? undefined : this.instructionConfig().dshHome);
+    const roots = [{ home: dshHome, display: this.homePaths.dshHomeDisplay(dshHome) }];
+    if (this.homePaths.resolveAgentsHome) {
+      const home = this.homePaths.resolveAgentsHome();
+      if (home !== dshHome) roots.push({ home, display: this.homePaths.agentsHomeDisplay(home) });
+    }
+    return roots.map(root => ({ path: join(root.home, 'AGENTS.md'), displayPath: root.display + '/AGENTS.md' }));
+  }
   directoryFileSystem(fs) {
     if (!fs) return;
-    const globalPath = join(this.homePaths.resolveDshHome(this.instructionConfig().dshHome), 'AGENTS.md');
+    const globalPaths = new Set(this.globalInstructionPaths().map(source => source.path));
     // A read-only view for the native directory-instructions plugin alone.
     // The same global file must not re-enter as a cwd/ancestor instruction.
     return {
       resolve: (path, ...options) => {
-        if (resolve(path) === globalPath) throw Object.assign(new Error('Global AGENTS.md is managed separately'), { code: 'FS_NOT_FOUND' });
+        if (globalPaths.has(resolve(path))) throw Object.assign(new Error('Global AGENTS.md is managed separately'), { code: 'FS_NOT_FOUND' });
         return fs.resolve(path, ...options);
       },
       stat: (...args) => fs.stat(...args),
@@ -314,27 +384,30 @@ export class PresetWorkshop extends Service {
   }
   async workspaceInstructions(cwd, scope, preset, includeDirectory = true) {
     const fs = scope.get('fs');
-    const config = this.instructionConfig(), dshHome = this.homePaths.resolveDshHome(config.dshHome), path = join(dshHome, 'AGENTS.md');
-    let original = '';
-    if (this.instructions && fs && config.maxBytes > 0) {
+    const config = this.instructionConfig(), paths = this.globalInstructionPaths(), path = paths[0].path;
+    const files = [];
+    if (this.instructions && fs && config.maxBytes > 0) for (const source of paths) {
+      let content = '';
       try {
-        const target = await fs.resolve(path), info = await fs.stat(target);
+        const target = await fs.resolve(source.path), info = await fs.stat(target);
         const limit = config.maxSourceBytes ?? 1048576;
         if (info?.type === 'file' && (info.size === undefined || info.size <= limit)) {
           let size = 0;
           for await (const chunk of await fs.streamText(target)) {
             size += Buffer.byteLength(chunk, 'utf8');
-            if (size > limit) { original = ''; break; }
-            original += chunk;
+            if (size > limit) { content = ''; break; }
+            content += chunk;
           }
         }
       } catch (error) {
         if (!['FS_NOT_FOUND', 'ENOENT', 'ENOTDIR'].includes(error.code)) throw error;
       }
+      if (content.trim() && !files.some(file => file.content.trim() === content.trim())) files.push({ absolutePath: source.path, displayPath: source.displayPath, content });
     }
+    const original = files.map(file => file.content).join('\n\n');
     const edit = preset.prompt.sections[AGENT_SECTION];
     const text = edit?.text ?? original;
-    const renderedText = this.instructions && text ? this.instructions.renderAgentInstructions([{ absolutePath: path, displayPath: this.homePaths.dshHomeDisplay(dshHome) + '/AGENTS.md', content: text }], { maxBytes: config.maxBytes }).text : '';
+    const renderedText = this.instructions && text ? this.instructions.renderAgentInstructions(edit ? [{ absolutePath: path, displayPath: paths[0].displayPath, content: text }] : files, { maxBytes: config.maxBytes }).text : '';
     const directory = includeDirectory && this.instructions && fs ? await this.instructions.loadBaselineInstructions({ ...config, cwd }, this.directoryFileSystem(fs)) : undefined;
     return { name: AGENT_SECTION, text, original, renderedText, directoryText: directory?.text ?? '', path, enabled: edit?.enabled ?? true, editable: Boolean(this.instructions && fs), reorderable: false, delivery: 'user-message', order: 0 };
   }
@@ -346,10 +419,21 @@ export class PresetWorkshop extends Service {
     const context = { agent: { session }, messages: [], signal: new AbortController().signal };
     // The registry provider uses the normal scope key for draft policy lookup.
     const scopedRegistry = { get: (name, options) => registry.get(name, { ...options, scope }), snapshot: options => registry.snapshot({ ...options, scope }) };
-    this.skillModule.apply({ tools: { register(tool) { registration = tool; }, get: () => enabled ? registration : undefined }, skills: scopedRegistry, on(event, hook) { if (event === 'agent/pre-step') hooks.push(hook); } }, this.catalog.packages.find(pkg => pkg.name === '@deepseek-ai/dsh-tool-skill')?.row.config ?? {});
+    this.skillModule.apply({ tools: { register(tool) { registration = tool; }, get: () => enabled ? registration : undefined }, skills: scopedRegistry, workingDirectory: { ensure: async () => cwd }, on(event, hook) { if (event === 'agent/pre-step') hooks.push(hook); } }, this.catalog.packages.find(pkg => pkg.name === '@deepseek-ai/dsh-tool-skill')?.row.config ?? {});
     let decision = { kind: 'continue', messages: [] };
     for (const hook of hooks.toReversed()) { const previous = decision; decision = await hook(context, async () => previous); }
     return decision.messages.find(message => message.source.kind === 'skill-catalog');
+  }
+  async previewTimeContext(cwd) {
+    // Only the native clock hook runs on a detached session; no Host hooks or history writes.
+    let hook, projection;
+    this.timeModule.apply({
+      sessionProjections: { register(value) { projection = value; }, stateOf: () => projection.init() },
+      on(event, listener) { if (event === 'agent/pre-step') hook = listener; },
+    }, {});
+    const session = this.ctx.sessions.prepare(undefined, { meta: { cwd } });
+    const decision = await hook({ agent: { session }, turn: 1, step: 1, signal: new AbortController().signal }, async () => ({ kind: 'continue', messages: [] }));
+    return decision.messages.find(message => message.source.kind === TIME_CONTEXT)?.content.filter(block => block.type === 'text').map(block => block.text).join('\n\n') ?? '';
   }
   configurePolling() {
     clearInterval(this.pollTimer);
@@ -367,8 +451,11 @@ export class PresetWorkshop extends Service {
     const selected = this.preset(id);
     const preview = await this.preview({ ...context, id: selected.id });
     const sources = await this.sourceSkills(preview.cwd);
+    const mcp = preview.mcp ?? [];
     this.lastScan = {
       tools: this.catalog.tools.filter(tool => tool.available).length,
+      mcpServers: mcp.length,
+      mcpTools: mcp.reduce((total, server) => total + server.tools.length, 0),
       promptSections: preview.editableSections.filter(section => !section.managedBy).length,
       skills: sources.skills.length,
       complete: sources.complete,
@@ -377,7 +464,7 @@ export class PresetWorkshop extends Service {
   async sourceVersion(roster) {
     const promptSources = scope => ['sections', 'contexts', 'variables'].map(kind => [...this.ctx.systemPrompt.layers.merge(scope, layer => layer[kind])]);
     const sources = [[this.ctx.skills.revision, promptSources(), this.ctx.get('permissionPresets')?.defaultPreset]];
-    for (const row of roster) if (!this.ownsPreset(row.id) && !row.broken) sources.push(await this.withSourceRegistry(row.id, (registry, scope) => [row.id, registry.revision, promptSources(scope)]));
+    sources.push(...await Promise.all(roster.filter(row => !this.ownsPreset(row.id) && !row.broken).map(row => this.withSourceRegistry(row.id, (registry, scope) => [row.id, registry.revision, promptSources(scope)]))));
     // Observe source registries, not transient draft scopes; a preview must not
     // cause its own next refresh. Never return source prompt text as a version.
     const signature = JSON.stringify(sources, (_, value) => {
@@ -392,14 +479,14 @@ export class PresetWorkshop extends Service {
     const roster = await this.ctx.agentPresets.list();
     const sourcesVersion = await this.sourceVersion(roster);
     const nameConflicts = roster.filter(row => !this.ownsPreset(row.id) && this.store.state.presets.some(preset => preset.name === row.name));
-    const proxyInjection = [...this.ctx.loader.entries()].some(entry => entry.options.name === 'billion-context' && !entry.disabled && entry.fiber?.state === 2);
     return structuredClone({
       ...this.store.state,
       defaultPresetId: this.ctx.agentPresets.defaultId,
-      sourcesVersion, proxyInjection,
+      sourcesVersion,
       catalog: {
         tools: this.catalog.tools,
         packages: this.catalog.packages.map(({ row, parents, templates, candidates, ...pkg }) => pkg),
+        mcpServers: this.catalog.mcpServers,
         scannedAt: this.catalog.scannedAt,
         revision: this.catalogRevision ?? 0,
         counts: this.lastScan,
@@ -408,7 +495,7 @@ export class PresetWorkshop extends Service {
       sessions: this.ctx.agents.list().map(agent => ({
         id: agent.id, contextVersion: agent.session.seq,
         permissions: this.ctx.sessionProjections.stateOf(agent.session, 'permissions'),
-        cwd: agent.session.header.cwd,
+        cwd: this.workingDirectory(agent.session),
         preset: this.ctx.agentPresets.composedPreset(agent.ctx),
         nextPreset: this.ctx.sessionProjections.stateOf(agent.session, 'agentPreset'),
         revision: this.agents.get(agent)?.policy.revision,
@@ -421,6 +508,7 @@ export class PresetWorkshop extends Service {
     let preset = value ?? this.preset(input.id);
     if (input.draft) { record(input.draft, 'draft'); preset = await this.validatedPreset({ ...preset, ...input.draft }, preset); }
     await this.catalog.prepare(preset);
+    const configuredToolNames = [...preset.tools.enabled];
     const useDraft = Boolean(input.draft) || !preset.enabled;
     const lease = useDraft ? undefined : await this.ctx.agentPresets.acquireScope(preset.id);
     const key = {};
@@ -435,12 +523,32 @@ export class PresetWorkshop extends Service {
       const viewKey = {};
       const view = createScope(scope.ctx, viewKey, { parent: key });
       this.previewPolicies.set(viewKey, preset);
+      const mcpToolNames = tool => tool.name.startsWith('mcp__');
+      const availableMcpTools = this.ctx.tools.schemas(key).filter(tool => {
+        if (!mcpToolNames(tool)) return false;
+        const server = this.mcpServerForTool(tool.name, preset);
+        return !server || this.mcpServerEnabled(preset, server.serverName);
+      }).map(functionSchema);
       view.ctx.tools.restrict({ allow: this.ctx.tools.schemas(key).map(t => t.name).filter(name => name !== 'run_code' && allowed.has(name)) });
       const live = input.sessionId && this.ctx.agents.get(input.sessionId);
       if (input.sessionId && !live) fail('session-not-found', 'Preview session is not open', 404);
       const defaults = [...this.ctx.loader.entries()].find(entry => entry.options.name === '@deepseek-ai/dsh-agent-default-model')?.options.config ?? {};
-      const cwd = input.cwd || live?.session.header.cwd || homedir();
+      const cwd = live ? this.workingDirectory(live.session) : input.cwd || homedir();
       const session = live?.session ?? this.ctx.sessions.prepare(undefined, { meta: { cwd, agentPreset: preset.id } });
+      let toolManagementPrompt = '', timePrompt = '';
+      if (live && Array.isArray(session.surface?.nodes) && typeof session.eventAt === 'function') {
+        const seen = new Set();
+        for (const seq of session.surface.nodes.map(Number).filter(Number.isFinite).sort((a, b) => b - a)) {
+          let event;
+          try { event = session.eventAt(seq); } catch { continue; }
+          const kind = event?.data?.source?.kind;
+          if (event?.type !== 'user/message' || !['prompt-manager-catalog', 'time-context'].includes(kind) || seen.has(kind)) continue;
+          seen.add(kind);
+          if (event.data.source.form === 'notice') continue;
+          const text = (event.data.content ?? []).filter(block => block.type === 'text').map(block => block.text).join('\n\n');
+          if (kind === 'time-context') timePrompt = text; else toolManagementPrompt = text;
+        }
+      }
       // prepare() is detached and skips session/created. Seed only this throwaway
       // session through the same permission defaults as a real new session.
       if (!live) this.ctx.get('permissionPresets')?.pinInitialPermission(session);
@@ -454,10 +562,11 @@ export class PresetWorkshop extends Service {
       const sourceSections = this.ctx.systemPrompt.layers.merge(viewKey, layer => layer.sections);
       const sections = assembly.sections.map((section, index) => ({ ...section, order: section.name === 'preset-workshop:persona' ? -1000 : preset.prompt.sections[section.name]?.order ?? sourceSections.get(section.name)?.order ?? index * 100 }));
       const editableSections = new Map((context.workshopSourceAssembly?.sections ?? []).filter(section => !PERSONA_SECTIONS.has(section.name)).map((section, index) => [section.name, { ...section, order: sourceSections.get(section.name)?.order ?? index * 100, enabled: true, ...(section.name.startsWith('tool:') ? { managedBy: 'tools', enabled: sections.some(active => active.name === section.name) } : {}) }]));
-      for (const [name, section] of Object.entries(preset.prompt.sections)) editableSections.set(name, { name, ...section });
+      for (const [name, section] of Object.entries(preset.prompt.sections)) if (section.custom || name === 'deployment:persona-suffix' || editableSections.get(name)?.text?.trim()) editableSections.set(name, { name, ...section });
       for (const section of sections) if (section.name.startsWith('tool:') && !editableSections.has(section.name)) editableSections.set(section.name, { ...section, managedBy: 'tools', enabled: true });
       const registry = this.scopes.get(useDraft ? key : lease.key)?.ctx.skills;
-      const skills = registry ? await registry.list({ cwd, scope: viewKey }) : [];
+      const skillSnapshot = registry ? await registry.snapshot({ cwd, scope: viewKey }) : { skills: [], complete: true };
+      const skills = skillSnapshot.skills;
       const prompt = this.renderPrompt(assembly);
       const contexts = this.renderContextSections(assembly);
       const runtimeContext = this.renderContextSnapshot(assembly);
@@ -465,25 +574,73 @@ export class PresetWorkshop extends Service {
       const tools = assembly.tools.map(functionSchema);
       const skillMessage = registry ? await this.previewSkillCatalog(registry, viewKey, cwd, tools.some(tool => tool.function.name === 'skill')) : undefined;
       const skillCatalog = skillMessage?.source.entries ?? [];
+      const skillWarnings = tools.some(tool => tool.function.name === 'skill') ? preset.skills.filter(name => !skillCatalog.some(entry => entry.name === name)) : [];
       const skillPrompt = skillMessage?.content.filter(block => block.type === 'text').map(block => block.text).join('\n\n') ?? '';
-      const toolSections = new Set(this.catalog.forPreset(preset).flatMap(tool => tool.sections ?? []));
-      const supplemental = [...editableSections.values()].filter(section => ![AGENT_SECTION, TOOL_GUIDANCE].includes(section.name)).map(section => ({ ...section, ...(toolSections.has(section.name) || section.name.startsWith('tool:') ? { managedBy: 'tools' } : {}), renderedText: section.enabled ? this.renderPrompt({ ...assembly, sections: [section] }) : section.text, editable: section.editable !== false, reorderable: section.reorderable !== false }));
+      const catalog = this.catalog.forPreset(preset);
+      const mcpTools = tools.filter(tool => mcpToolNames(tool.function));
+      const mcpServers = [...new Map([
+        ...((this.catalog.mcpServers ?? []).map(server => [server.serverName, { ...server, config: this.catalog.mcpConfigs?.get(server.serverName), source: 'global', enabled: this.mcpServerEnabled(preset, server.serverName) }])),
+        ...((preset.mcp ?? []).map(server => [server.serverName, { ...server, source: 'preset', enabled: server.enabled !== false, connection: this.mcpStates.get(useDraft ? key : lease.key)?.get(server.serverName) ?? { state: server.enabled === false ? 'disabled' : 'connecting' } }])),
+      ]).values()];
+      const mcpServerForTool = name => mcpServers.filter(server => server.source !== 'unknown' && name.startsWith(`mcp__${server.serverName}__`)).sort((a, b) => b.serverName.length - a.serverName.length)[0];
+      const unidentifiedMcpTools = availableMcpTools.filter(tool => !mcpServerForTool(tool.function.name));
+      if (unidentifiedMcpTools.length) mcpServers.push({ serverName: '', source: 'unknown', tools: unidentifiedMcpTools });
+      for (const tool of availableMcpTools) {
+        const server = mcpServerForTool(tool.function.name);
+        catalog.push({ name: tool.function.name, kind: 'mcp', mcpServer: server?.serverName, ...(server ? { package: MCP_CLIENT_MODULE } : {}), light: true, available: true, schema: tool, sections: [`tool:${tool.function.name}`], prompt: '' });
+      }
+      const toolSections = new Set(catalog.flatMap(tool => tool.sections ?? []));
+      const supplemental = filterMcpSections([...editableSections.values()], preset).filter(section => section.text?.trim() && ![AGENT_SECTION, TOOL_GUIDANCE, TIME_CONTEXT].includes(section.name) && !(assembly.contexts.some(context => context.name === 'working-directory:current') && isLegacyCwdSection(section))).map(section => ({ ...section, ...(toolSections.has(section.name) || section.name.startsWith('tool:') ? { managedBy: 'tools' } : {}), renderedText: section.enabled ? this.renderPrompt({ ...assembly, sections: [section] }) : section.text, editable: section.editable !== false, reorderable: section.reorderable !== false }));
       const guidanceSections = sections.filter(section => section.name.startsWith('tool:') || toolSections.has(section.name));
-      const selectedToolSections = new Set(this.catalog.forPreset(preset).filter(tool => allowed.has(tool.name)).flatMap(tool => tool.sections ?? []));
+      const selectedToolSections = new Set(catalog.filter(tool => allowed.has(tool.name)).flatMap(tool => tool.sections ?? []));
       const guidanceMembers = supplemental.filter(section => section.managedBy === 'tools' && (selectedToolSections.has(section.name) || allowed.has(section.name.slice(5))));
       if (guidanceMembers.length) supplemental.push({ name: TOOL_GUIDANCE, text: this.renderPrompt({ ...assembly, sections: guidanceSections }), order: preset.prompt.sections[TOOL_GUIDANCE]?.order ?? Math.min(...guidanceMembers.map(section => section.order)), enabled: preset.prompt.sections[TOOL_GUIDANCE]?.enabled ?? true, members: guidanceMembers, managedBy: 'tool-guidance', editable: true, reorderable: true });
       const personaSections = assembly.sections.filter(section => PERSONA_SECTIONS.has(section.name)).map(section => ({ name: section.name, text: section.text, renderedText: this.renderPrompt({ ...assembly, sections: [section] }), editable: false }));
       const agentText = [agentInstructions.enabled ? agentInstructions.renderedText : '', agentInstructions.directoryText].filter(Boolean).join('\n\n');
-      const displayPrompt = ['# SYSTEM\n\n' + prompt,
-        tools.length ? '## TOOL\n\n' + tools.map(tool => tool.function.name + '：' + tool.function.description).join('\n\n') : '',
-        '# USER\n\n' + (input.language === 'en' ? '[First user message · placeholder only; Preset Workshop does not edit conversation messages.]' : '［用户第一句话 · 仅作占位，预设工坊不修改会话消息。］'),
-        runtimeContext ? '## 环境策略\n\n' + runtimeContext : '',
+      const regularTools = tools.filter(tool => !mcpTools.includes(tool));
+      const timeEnabled = preset.prompt.sections[TIME_CONTEXT]?.enabled !== false;
+      timePrompt = timeEnabled ? (timePrompt || await this.previewTimeContext(cwd)) : '';
+      const displayPrompt = ['# System\n\n' + prompt,
+        regularTools.length ? '## TOOL\n\n' + regularTools.map(tool => tool.function.name + '：' + tool.function.description).join('\n\n') : '',
+        mcpTools.length ? '## MCP服务器\n\n' + mcpTools.map(tool => tool.function.name + '：' + tool.function.description).join('\n\n') : '',
+        '# User\n\n' + (input.language === 'en' ? '[First user message · placeholder only; Preset Workshop does not edit conversation messages.]' : '［用户第一句话 · 仅作占位，预设工坊不修改会话消息。］'),
+        runtimeContext ? '## 环境\n\n' + runtimeContext : '',
         skillPrompt ? '## SKILL\n\n' + skillPrompt : '',
-        agentInstructions.enabled && agentInstructions.renderedText ? (agentInstructions.directoryText ? '## AGENT［全局］' : '## AGENT') + '\n\n' + agentInstructions.renderedText : '',
-        agentInstructions.directoryText ? '## AGENT［目录］\n\n' + agentInstructions.directoryText : ''].filter(Boolean).join('\n\n');
-      const liveAssembly = live && this.ctx.agentPresets.composedPreset(live.ctx) === preset.id ? await this.ctx.systemPrompt.assemble({ scope: live, agent: live }) : undefined;
-      const runtime = liveAssembly ? { sessionId: live.id, tools: liveAssembly.tools.map(functionSchema), prompt: this.renderPrompt(liveAssembly), pendingTools: tools.map(tool => tool.function.name).filter(name => !liveAssembly.tools.some(actual => actual.name === name) || !this.toolSourceMatches(name, scopeParentOf(live), preset)) } : undefined;
-      return { prompt, displayPrompt, runtime, sections, editableSections: supplemental, personaSections, agentInstructions, skillCatalog, skillPrompt, runtimeContext, contexts, variables: assembly.variables, tools, skills, catalog: this.catalog.forPreset(preset), estimatedTokens: Math.ceil((prompt.length + agentText.length + JSON.stringify(assembly.tools).length + runtimeContext.length + skillPrompt.length) / 4), cwd, model: agent.options.model, provider: agent.options.provider };
+        timePrompt ? '## 时间与时区\n\n' + timePrompt : '',
+        toolManagementPrompt ? '## 提示词管理（User）\n\n' + toolManagementPrompt : '',
+        agentInstructions.enabled && agentInstructions.renderedText ? '## AGENTS（全局级）\n\n' + agentInstructions.renderedText : '',
+        agentInstructions.directoryText ? '## AGENTS（目录级）\n\n' + agentInstructions.directoryText : ''].filter(Boolean).join('\n\n');
+      const liveMatches = live && this.ctx.agentPresets.composedPreset(live.ctx) === preset.id;
+      let liveAssembly, runtimeError;
+      if (liveMatches) {
+        try { liveAssembly = await this.ctx.systemPrompt.assemble({ scope: live, agent: live }); }
+        catch (error) { runtimeError = error.message; }
+      }
+      let runtime;
+      if (liveMatches) {
+        let livePrompt = '';
+        if (liveAssembly) {
+          try { livePrompt = this.renderPrompt(liveAssembly); }
+          catch (error) { runtimeError = error.message; }
+        }
+        runtime = { sessionId: live.id, tools: liveAssembly?.tools.map(functionSchema) ?? [], prompt: livePrompt, ...(runtimeError ? { error: runtimeError } : {}), pendingTools: liveAssembly ? tools.map(tool => tool.function.name).filter(name => !liveAssembly.tools.some(actual => actual.name === name) || !this.toolSourceMatches(name, scopeParentOf(live), preset)) : [] };
+      }
+      const mcp = mcpServers.map(server => {
+        const toolsForServer = server.source === 'unknown'
+          ? server.tools
+          : availableMcpTools.filter(tool => mcpServerForTool(tool.function.name)?.serverName === server.serverName);
+        const cached = server.enabled !== false && server.source !== 'preset' && server.source !== 'unknown'
+          ? catalog.filter(tool => tool.kind === 'mcp' && tool.mcpServer === server.serverName && !tool.available && tool.schema).map(tool => ({ ...tool.schema, function: { ...tool.schema.function, unavailable: true } }))
+          : [];
+        const known = new Set([...toolsForServer, ...cached].map(tool => tool.function.name));
+        const saved = configuredToolNames.filter(name => !known.has(name) && mcpServerForTool(name)?.serverName === server.serverName).map(name => ({ name, description: '', unavailable: true }));
+        return { ...server, tools: [...toolsForServer, ...cached, ...saved] };
+      });
+      const userSections = [
+        { name: TIME_CONTEXT, text: timePrompt, enabled: timeEnabled, toggleable: true, order: 0 },
+        ...(toolManagementPrompt ? [{ name: 'prompt-manager-catalog', text: toolManagementPrompt, source: 'dsh-plugin-tool-management' }] : []),
+      ].map(section => ({ ...section, managedBy: 'host', editable: false, reorderable: false, delivery: 'user-message' }));
+      return { prompt, displayPrompt, runtime, sections, editableSections: supplemental, personaSections, agentInstructions, userSections, skillCatalog, skillPrompt, skillWarnings, runtimeContext, contexts, variables: assembly.variables, tools, skills, catalog, mcp, estimatedTokens: Math.ceil((prompt.length + agentText.length + JSON.stringify(assembly.tools).length + runtimeContext.length + skillPrompt.length + toolManagementPrompt.length + timePrompt.length) / 4), cwd, model: agent.options.model, provider: agent.options.provider };
     } finally { this.previewPolicies.delete(key); await scope.dispose(); await lease?.[Symbol.asyncDispose](); }
   }
   async references(id) {
@@ -560,8 +717,13 @@ export class PresetWorkshop extends Service {
   }
   async validatedPreset(value, previous, all = this.store.state.presets, roster = []) {
     const preset = validatePreset(value, previous, all, roster);
+    this.assertMcpNames(preset);
+    this.assertMcpToolSelections(preset);
     if (preset.enabled) await this.catalog.prepare(preset);
-    return validatePreset(preset, previous, all, roster, preset.enabled ? this.catalog.forPreset(preset) : []);
+    const checked = validatePreset(preset, previous, all, roster, preset.enabled ? this.catalog.forPreset(preset) : []);
+    this.assertMcpNames(checked);
+    this.assertMcpToolSelections(checked);
+    return checked;
   }
   async commitPreset(preset, previous) {
     const next = structuredClone(this.store.state);
@@ -569,12 +731,13 @@ export class PresetWorkshop extends Service {
     else { next.presets.push(preset); next.config.presetIds.push(preset.id); }
     next.config.selectedPresetId = preset.id;
     await this.commitState(next, [preset]);
+    if (!previous) this.retired.delete(preset.id);
     return this.snapshot();
   }
   async commitState(next, changed) {
     const before = structuredClone(this.store.state);
     const definitions = new Map(this.definitions);
-    const composition = p => JSON.stringify({ name: p.name, description: p.description, prompt: p.prompt, skills: p.skills, packages: p.tools.packages, overrides: p.tools.overrides });
+    const composition = p => JSON.stringify({ name: p.name, description: p.description, prompt: p.prompt, skills: p.skills, mcp: p.mcp, mcpEnabled: p.mcpEnabled, packages: p.tools.packages, overrides: p.tools.overrides });
     try {
       for (const preset of changed) {
         const previous = before.presets.find(p => p.id === preset.id);
@@ -600,6 +763,15 @@ export class PresetWorkshop extends Service {
   }
   async action(input) {
     await this.ready;
+    if (input?.action === 'mcp-probe') {
+      if (this.stopping) fail('workshop-stopped', 'Preset Workshop is stopping', 503);
+      let server = input.server;
+      if (!server) {
+        const preset = this.preset(input.id);
+        server = this.catalog.mcpConfigs?.get(input.serverName) ?? preset.mcp.find(item => item.serverName === input.serverName);
+      }
+      return probeMcp(this.ownerCtx, { ...input, server });
+    }
     return this.store.run(async () => {
       if (this.stopping) fail('workshop-stopped', 'Preset Workshop is stopping', 503);
       record(input, 'request');
@@ -653,6 +825,32 @@ export class PresetWorkshop extends Service {
         if (preset.enabled !== previous.enabled) fail('use-toggle', 'Use the enable/disable action');
         return this.commitPreset(preset, previous);
       }
+      case 'mcp-create': {
+        const previous = this.preset(input.id); this.revision(input, previous);
+        const server = structuredClone(input.server);
+        const preset = await this.validatedPreset({ ...previous, mcp: [...(previous.mcp ?? []), server] }, previous);
+        return this.commitPreset(preset, previous);
+      }
+      case 'mcp-update': {
+        const previous = this.preset(input.id); this.revision(input, previous);
+        if (typeof input.serverName !== 'string' || !input.serverName) fail('invalid-mcp', 'serverName is required');
+        const current = (previous.mcp ?? []).find(server => server.serverName === input.serverName);
+        if (!current) fail('mcp-not-found', `Unknown MCP server: ${input.serverName}`, 404);
+        const server = structuredClone(input.server);
+        if (server.serverName !== input.serverName) fail('immutable-mcp-name', 'MCP serverName cannot be changed');
+        const preset = await this.validatedPreset({ ...previous, mcp: previous.mcp.map(item => item.serverName === input.serverName ? server : item) }, previous);
+        return this.commitPreset(preset, previous);
+      }
+      case 'mcp-delete': {
+        const previous = this.preset(input.id); this.revision(input, previous);
+        if (typeof input.serverName !== 'string' || !input.serverName) fail('invalid-mcp', 'serverName is required');
+        if (!(previous.mcp ?? []).some(server => server.serverName === input.serverName)) fail('mcp-not-found', `Unknown MCP server: ${input.serverName}`, 404);
+        const servers = previous.mcp.filter(server => server.serverName !== input.serverName);
+        const owner = name => (previous.mcp.filter(server => name.startsWith(`mcp__${server.serverName}__`)).sort((a, b) => b.serverName.length - a.serverName.length)[0]?.serverName);
+        const enabled = previous.tools.enabled.filter(name => owner(name) !== input.serverName);
+        const preset = await this.validatedPreset({ ...previous, mcp: servers, tools: { ...previous.tools, enabled } }, previous);
+        return this.commitPreset(preset, previous);
+      }
       case 'reset': {
         const previous = this.preset(input.id); this.revision(input, previous);
         const preset = { ...this.freshPreset(previous.id, previous.name, previous.builtin), enabled: previous.enabled, description: previous.description, revision: previous.revision + 1 };
@@ -663,7 +861,7 @@ export class PresetWorkshop extends Service {
         const previous = this.preset(input.id); this.revision(input, previous);
         if (previous.builtin) fail('protected-preset', 'The built-in preset cannot be disabled or deleted');
         if (input.action === 'toggle' && typeof input.enabled !== 'boolean') fail('invalid-enabled', 'enabled: expected a boolean');
-        if (input.action === 'toggle' && input.enabled) return this.commitPreset({ ...previous, enabled: true, revision: previous.revision + 1 }, previous);
+        if (input.action === 'toggle' && input.enabled) { this.retired.delete(previous.id); return this.commitPreset({ ...previous, enabled: true, revision: previous.revision + 1 }, previous); }
         const references = await this.references(previous.id);
         if (references.length && input.confirm !== true) fail('confirmation-required', 'Session fallback must be confirmed', 409);
         const fallback = this.store.state.config.fallbackPresetId === previous.id ? BUILTIN_ID : this.store.state.config.fallbackPresetId;
@@ -671,6 +869,7 @@ export class PresetWorkshop extends Service {
         // Keep the original preset available; do not blindly reverse durable
         // session events that another process may already have observed.
         await this.migrate(previous.id, fallback, references);
+        this.retired.set(previous.id, fallback);
         const next = structuredClone(this.store.state);
         if (input.action === 'delete') { next.presets = next.presets.filter(p => p.id !== previous.id); next.config.presetIds = next.config.presetIds.filter(id => id !== previous.id); }
         else next.presets[next.presets.findIndex(p => p.id === previous.id)] = { ...previous, enabled: false, revision: previous.revision + 1 };
@@ -700,13 +899,15 @@ export class PresetWorkshop extends Service {
       }
       case 'export': {
         if (input.format && !['yaml', 'json'].includes(input.format)) fail('invalid-format', 'format: expected json or yaml');
-        const presets = input.all ? this.store.state.presets : [this.preset(input.id)];
+        const ids = Array.isArray(input.ids) ? [...new Set(input.ids)] : undefined;
+        if (ids && (!ids.length || ids.some(id => typeof id !== 'string'))) fail('invalid-export', 'ids: select one or more presets');
+        const presets = input.all ? this.store.state.presets : ids ? ids.map(id => this.preset(id)) : [this.preset(input.id)];
         const document = { format: 'dsh-preset-workshop', version: 1, presets: structuredClone(presets) };
         return { text: input.format === 'yaml' ? yaml.dump(document, { noRefs: true, lineWidth: -1 }) : JSON.stringify(document, null, 2), format: input.format === 'yaml' ? 'yaml' : 'json' };
       }
       case 'import': {
         if (!['new', 'overwrite', 'rename'].includes(input.mode)) fail('invalid-import-mode', 'mode: expected new, overwrite or rename');
-        if (!['yaml', 'json'].includes(input.format) || typeof input.text !== 'string' || Buffer.byteLength(input.text) > 2 * 1024 * 1024) fail('invalid-import', 'Expected json or yaml text up to 2 MiB');
+        if (!['yaml', 'json'].includes(input.format) || typeof input.text !== 'string' || Buffer.byteLength(input.text) > MAX_PAYLOAD_BYTES) fail('invalid-import', 'Expected json or yaml text up to 8 MiB');
         let document;
         try { document = input.format === 'yaml' ? yaml.load(input.text, { schema: yaml.JSON_SCHEMA }) : JSON.parse(input.text); }
         catch (error) { fail('import-syntax', error.message); }
@@ -761,7 +962,7 @@ export class PresetWorkshop extends Service {
       if (req.method !== 'POST') { send(405, { error: 'method-not-allowed' }); return; }
       if (!req.headers['content-type']?.startsWith('application/json')) fail('content-type', 'Expected application/json', 415);
       const chunks = []; let size = 0;
-      for await (const chunk of req) { size += chunk.length; if (size > 2 * 1024 * 1024) fail('payload-too-large', 'Payload exceeds 2 MiB', 413); chunks.push(chunk); }
+      for await (const chunk of req) { size += chunk.length; if (size > MAX_REQUEST_BYTES) fail('payload-too-large', 'Encoded request exceeds 48 MiB plus envelope', 413); chunks.push(chunk); }
       const input = JSON.parse(Buffer.concat(chunks).toString('utf8'));
       if (!input || typeof input.action !== 'string') fail('invalid-action', 'action is required');
       send(200, await this.action(input));

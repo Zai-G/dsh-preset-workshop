@@ -8,7 +8,7 @@ window.__ModuleLoader__.load({
     const AGENT = 'workshop:agent-instructions';
     const DIRECTORY_AGENT = 'workshop:directory-instructions';
     const names = { ask_user_question: 'ask', todo_write: 'todo' };
-    const toolIcons = { bash: 'terminal', pwsh: 'terminal', read: 'file', edit: 'edit', write: 'file-plus', web_search: 'globe', web_fetch: 'globe', ask_user_question: 'chat', subagent: 'agent', todo_write: 'jobs', glob: 'search', grep: 'search', skill: 'skill', present: 'present', job_list: 'jobs', job_output: 'jobs', job_kill: 'jobs', subagent_fork: 'agent' };
+    const toolIcons = { bash: 'terminal', pwsh: 'terminal', read: 'file', edit: 'edit', write: 'file-plus', web_search: 'globe', web_fetch: 'globe', ask_user_question: 'chat', subagent: 'agent', todo_write: 'jobs', glob: 'search', grep: 'search', skill: 'skill', present: 'present', job_list: 'jobs', job_output: 'jobs', job_kill: 'jobs', subagent_fork: 'agent', list_mcp_resources: 'cloud', list_mcp_resource_templates: 'cloud', read_mcp_resource: 'cloud' };
     const clone = value => structuredClone(value);
     const equal = (a, b) => a === b || Boolean(a && b && typeof a === 'object' && typeof b === 'object' && Array.isArray(a) === Array.isArray(b) && Object.keys(a).length === Object.keys(b).length && Object.keys(a).every(key => Object.hasOwn(b, key) && equal(a[key], b[key])));
     const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -21,11 +21,13 @@ window.__ModuleLoader__.load({
       '每': 'Every', '秒': 'seconds', '人设': 'Persona', '变量': 'Variables', '只读 · 实际值': 'Read only · Actual values',
       '拼接': 'Supplemental instructions', '取消': 'Cancel', '保存': 'Save', '工具': 'Tools', '内置': 'Built in',
       '可选': 'Optional', '官方': 'Official', '第三方': 'Third party', '工具说明随开关同步更新': 'Tool instructions follow tool visibility',
-      '技能绑定': 'Skills', '未绑定技能': 'No skills selected', '检测到的技能': 'Discovered skills', '全开': 'Select all', '全不开': 'Clear all',
-      '绑定技能时同步开启 skill 工具；可在工具区手动关闭。': 'Selecting skills also enables the skill tool; you can turn it off in Tools.',
+      '技能绑定': 'Skills', '未绑定技能': 'No skills selected', '检测到的技能': 'Discovered skills', '全开': 'Select all', '全不开': 'Clear all', 'MCP服务': 'MCP services', '未发现 MCP 服务': 'No MCP services detected', '新建 MCP 服务器': 'New MCP server', '添加 MCP': 'Add MCP',
+      '绑定技能时同步开启 skill 工具；若未开启 skill 工具，User段SKILL不会进入上下文，可能会出现AI不自主选择技能使用；手动给出技能路径不受影响': 'Selecting skills also enables the skill tool. If it is off, the User SKILL catalog is omitted and AI may not select skills on its own. Providing a skill path manually still works.',
+      '拼接说明': 'About assembled context',
+      '部分插件注入的提示词未向 DSH 暴露读取或覆盖接口，此层不包含在工坊预览中。但实际仍会进入上下文': 'Some plugins inject prompts without a DSH read or override interface. Those prompts are outside this preview but still enter the context.',
       '预览': 'Preview', '展开预览': 'Expand preview', '预览环境': 'Preview context', '工作目录': 'Working directory',
       '工具与技能': 'Tools and skills', '最终提示词': 'Final prompt', '复制提示词': 'Copy prompt',
-      '工具仅展示顶层描述；AGENT、环境策略和技能目录通过 User 消息注入。预览不含实际用户消息；token 为字符数估算。': 'Tools show top-level descriptions. AGENT, runtime policy and skills enter as User messages. User messages are placeholders; tokens are character-based estimates.',
+      '工具仅展示顶层描述；工作目录等环境、AGENTS 和技能目录通过 User 消息注入。预览不含实际对话历史；token 为字符数估算。': 'Tools show top-level descriptions. Environment (including working directory), AGENTS and skills enter as User messages. Conversation history is omitted; tokens are character-based estimates.',
       '请确保您了解 AI 与提示词的机制，否则请不要修改系统提示词与工具描述；您的任何修改导致的后果由您个人承担。': 'Only edit system prompts and tool descriptions if you understand their effect on AI behavior. You are responsible for the consequences of your changes.',
       '停用或删除预设时，引用它的会话将回退到此预设。会话的消息历史不会改变。': 'Sessions referencing a disabled or deleted preset fall back to this preset. Message history is preserved.',
       '在提示词中写入 {{provider}}、{{model}} 或 {{cwd}}，将替换为当前会话的实际值。变量只读，无需在此编辑。': 'Use {{provider}}, {{model}} or {{cwd}} to insert actual values. Variables are read only.',
@@ -135,11 +137,13 @@ window.__ModuleLoader__.load({
       }
       function toolEnabled(tool) { return tool.light === false ? draft.tools.packages.includes(tool.package) : draft.tools.enabled.includes(tool.name); }
       function toolCard(tool) {
-        return `<div class="tool-card${toolEnabled(tool) ? '' : ' off'}">${icon(toolIcons[tool.name] || 'box')}<div class="tool-info"><div class="tool-name" title="${esc(tool.name)}">${esc(names[tool.name] || tool.name)}</div>${tool.schema ? `<button class="text-button" data-description="${esc(tool.name)}">${t('工具描述', 'Description')} ${icon('chevron')}</button>` : ''}${!tool.available ? `<span class="unavailable">${t('不可用', 'Unavailable')}</span>` : ''}</div><label class="switch"><input type="checkbox" data-tool="${esc(tool.name)}" aria-label="${esc(t('启用 ', 'Enable ') + tool.name)}" ${toolEnabled(tool) ? 'checked' : ''} ${!tool.available ? 'disabled' : ''}><span class="track"></span></label></div>`;
+        const toolIcon = tool.kind === 'mcp' ? 'box' : toolIcons[tool.name] || 'box';
+        const unavailable = tool.unavailable || !tool.available;
+        return `<div class="tool-card${toolEnabled(tool) ? '' : ' off'}">${icon(toolIcon)}<div class="tool-info"><div class="tool-name" title="${esc(tool.name)}">${esc(names[tool.name] || tool.name)}</div>${tool.schema ? `<button class="text-button" data-description="${esc(tool.name)}">${t('工具描述', 'Description')} ${icon('chevron')}</button>` : ''}${unavailable ? `<span class="unavailable">${t('不可用', 'Unavailable')}</span>` : ''}</div><label class="switch"><input type="checkbox" data-tool="${esc(tool.name)}" aria-label="${esc(t('启用 ', 'Enable ') + tool.name)}" ${toolEnabled(tool) ? 'checked' : ''} ${tool.serverDisabled || !tool.available && !tool.unavailable ? 'disabled' : ''}><span class="track"></span></label></div>`;
       }
       const toolSource = name => preview?.catalog.find(tool => tool.name === name) || state.catalog.tools.find(tool => tool.name === name);
       function tools() {
-        const all = state.catalog.tools.map(tool => toolSource(tool.name)), builtinNames = [all.some(tool => tool.name === 'pwsh' && tool.available) && !all.some(tool => tool.name === 'bash' && tool.available) ? 'pwsh' : 'bash', ...BUILTINS.slice(1)], official = all.filter(tool => !builtinNames.includes(tool.name) && tool.kind !== 'thirdparty'), third = all.filter(tool => !builtinNames.includes(tool.name) && tool.kind === 'thirdparty');
+        const all = state.catalog.tools.map(tool => toolSource(tool.name)).filter(Boolean), builtinNames = [all.some(tool => tool.name === 'pwsh' && tool.available) && !all.some(tool => tool.name === 'bash' && tool.available) ? 'pwsh' : 'bash', ...BUILTINS.slice(1)], visible = all.filter(tool => tool.kind !== 'mcp'), official = visible.filter(tool => !builtinNames.includes(tool.name) && tool.kind !== 'thirdparty'), third = visible.filter(tool => !builtinNames.includes(tool.name) && tool.kind === 'thirdparty');
         $('builtin-tools').innerHTML = builtinNames.map(name => all.find(tool => tool.name === name)).filter(Boolean).map(toolCard).join('');
         $('official-tools').innerHTML = official.map(toolCard).join('');
         $('thirdparty-tools').className = third.length ? 'tools-grid bounded-list' : 'bounded-list';
@@ -149,44 +153,73 @@ window.__ModuleLoader__.load({
           $('official-tools').insertAdjacentHTML('beforeend', `<div class="tool-card${draft.tools.packages.includes(pkg.name) ? '' : ' off'}">${icon('box')}<div class="tool-info"><div class="tool-name" title="${esc(pkg.name)}">${esc(pkg.name.replace('@deepseek-ai/dsh-tool-', ''))}</div><small class="${pkg.error ? 'unavailable' : 'muted'}">${esc(pkg.error || t('启用后检测工具', 'Discover tools on enable'))}</small></div><label class="switch"><input type="checkbox" data-package="${esc(pkg.name)}" aria-label="${esc(t('启用 ', 'Enable ') + pkg.name)}" ${draft.tools.packages.includes(pkg.name) ? 'checked' : ''} ${!pkg.available || pkg.error ? 'disabled' : ''}><span class="track"></span></label></div>`);
         }
       }
+      function mcp() {
+        const expanded = new Set([...$('mcp-list').querySelectorAll('.mcp-server[open]')].map(server => server.dataset.serverName));
+        const rows = [...(preview?.mcp || [])].sort((a, b) => (a.source === 'preset') - (b.source === 'preset'));
+        $('mcp-summary').textContent = rows.length ? t(`${rows.length} 个 MCP 服务`, `${rows.length} MCP services`) : t('未发现 MCP 服务', 'No MCP services detected');
+        $('mcp-list').innerHTML = rows.length ? rows.map(server => {
+          const selected = server.tools.filter(tool => draft.tools.enabled.includes(tool.function?.name ?? tool.name)).length;
+          const label = server.source === 'unknown' ? t('来源未识别', 'Unidentified source') : (server.serverName || t('未知服务', 'Unknown service'));
+          const enabled = server.source === 'preset' ? (draft.mcp || []).find(item => item.serverName === server.serverName)?.enabled !== false : draft.mcpEnabled?.[server.serverName] !== false;
+          const lock = selected > 0, unknown = server.source === 'unknown';
+          const connection = server.connection?.state, connectionLabel = !enabled ? t('已关闭', 'Disabled') : connection === 'connecting' ? t('连接中…', 'Connecting…') : connection === 'error' ? t('连接失败，请检查配置', 'Connection failed; check configuration') : connection === 'unsaved' ? t('保存后连接', 'Connects after saving') : `${selected}/${server.tools.length}`;
+          const actions = `<div class="mcp-service-controls"><button type="button" class="text-button" data-mcp-preview="${esc(server.serverName)}">${icon('eye')}${t('预览', 'Preview')}</button>${server.source === 'preset' ? `<span class="mcp-actions"><button type="button" class="icon-button ghost" data-mcp-edit="${esc(server.serverName)}" aria-label="${esc(t('编辑 MCP 服务', 'Edit MCP service'))}" title="${esc(t('编辑', 'Edit'))}">${icon('edit')}</button><button type="button" class="icon-button ghost danger" data-mcp-delete="${esc(server.serverName)}" aria-label="${esc(t('删除 MCP 服务', 'Delete MCP service'))}" title="${esc(t('删除', 'Delete'))}">${icon('trash')}</button></span>` : ''}${!unknown ? `<label class="switch" title="${esc(lock ? t('先关闭该服务的全部工具，才能切换服务开关。', 'Disable all tools from this service before switching it.') : t('仅影响当前预设', 'Affects this preset only'))}"><input type="checkbox" data-mcp-enabled="${esc(server.serverName)}" aria-label="${esc(t('启用 MCP：', 'Enable MCP: ') + label)}" ${enabled ? 'checked' : ''} ${lock ? 'disabled' : ''}><span class="track"></span></label>` : ''}</div>`;
+          return `<details class="mcp-server" data-server-name="${esc(server.serverName)}"><summary><span>${esc(label)}</span><small class="muted">${server.source === 'preset' ? t('当前工具', 'Current tool') : unknown ? t('未识别', 'Unidentified') : t('环境', 'Environment')} · ${esc(connectionLabel)}</small><svg class="icon chevron"><use href="#i-chevron"/></svg></summary>${actions}<div class="mcp-tools">${server.tools.length ? server.tools.map(tool => { const schema = tool.function ? tool : { type: 'function', function: tool }, definition = schema.function; return toolCard({ name: definition.name, kind: 'mcp', mcpServer: server.serverName, available: enabled, serverDisabled: !enabled, unavailable: Boolean(definition.unavailable), light: true, schema: definition.unavailable ? undefined : schema }); }).join('') : `<span class="muted">${t(enabled ? '尚未发现工具，可在预览中检测。' : '开启服务后检测工具。', enabled ? 'No tools yet; detect them in Preview.' : 'Enable the service to detect tools.')}</span>`}</div></details>`;
+        }).join('') : `<div class="empty-state">${icon('cloud')}<span>${t('扫描后会显示全局 MCP；新建的 MCP 仅属于当前预设。', 'Global MCP services appear after scanning. New services belong only to this preset.')}</span></div>`;
+        for (const server of $('mcp-list').querySelectorAll('.mcp-server')) server.open = expanded.has(server.dataset.serverName);
+      }
       function skills() {
         const all = [...sourceSkills];
         for (const name of draft.skills) if (!all.some(skill => skill.name === name)) all.push({ name, description: t('未在当前目录发现；保存的绑定仍保留。', 'Not found in this directory; the saved selection is preserved.') });
         $('skill-list').innerHTML = all.length ? all.map(skill => `<div class="skill-row">${icon('skill')}<div class="skill-copy"><p>${esc(skill.name)}</p><small class="skill-description" title="${esc(skill.description)}">${esc(skill.description)}</small><button type="button" class="text-button" data-skill-detail="${esc(skill.name)}">${t('查看详细', 'View details')} ${icon('chevron')}</button></div><label class="switch"><input type="checkbox" data-skill="${esc(skill.name)}" aria-label="${esc(t('绑定 ', 'Select ') + skill.name)}" ${draft.skills.includes(skill.name) ? 'checked' : ''}><span class="track"></span></label></div>`).join('') : `<div class="empty-state">${icon('skill')}<span>${t('未发现技能', 'No skills detected')}</span></div>`;
+        if (preview?.skillWarnings?.length) $('skill-list').insertAdjacentHTML('beforeend', `<p class="unavailable">${esc(t('以下绑定尚未进入 AI 上下文，请检查来源后重试：', 'These selected skills could not enter the AI context; check their sources and retry: ') + preview.skillWarnings.join('、'))}</p>`);
         if (!completeSkills) $('skill-list').insertAdjacentHTML('beforeend', `<p class="unavailable">${t('技能目录扫描尚未完整，现有选择已保留。', 'Skill discovery is incomplete. Existing selections are preserved.')}</p>`);
+        const allSelected = all.length > 0 && all.every(skill => draft.skills.includes(skill.name));
+        $('skills-all').textContent = t(allSelected ? '全不开' : '全开', allSelected ? 'Clear all' : 'Select all');
       }
       function supplemental() {
-        const actual = (preview?.editableSections || []).filter(section => section.managedBy !== 'tools');
+        const actual = (preview?.editableSections || []).filter(section => section.managedBy !== 'tools' && (!section.name.startsWith('mcp:') || section.text?.trim()));
         const items = actual.filter(section => !section.custom || draft.prompt.sections[section.name]).map(section => {
           const edit = draft.prompt.sections[section.name];
-          return { ...section, ...(section.managedBy === 'tool-guidance' ? edit ? { order: edit.order, enabled: edit.enabled } : {} : edit || {}) };
+          return { ...section, ...(section.managedBy === 'tool-guidance' ? edit ? { order: edit.order, enabled: edit.enabled } : {} : edit || {}), ...(section.name === 'mcp-resource-servers' ? { text: section.text } : {}) };
         });
         for (const [name, section] of Object.entries(draft.prompt.sections)) if (section.custom && !items.some(item => item.name === name)) items.push({ name, ...section });
         return items.sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
       }
       function sections() {
         const items = supplemental(), agent = preview?.agentInstructions;
-        const row = (section, isAgent) => {
-          const directory = section.name === DIRECTORY_AGENT, guidance = section.managedBy === 'tool-guidance';
-          const name = isAgent ? (agent.directoryText ? t('AGENT［全局］', 'AGENT [Global]') : 'AGENT') : directory ? t('AGENT［目录］', 'AGENT [Directory]') : section.name === 'deployment:persona-suffix' ? t('工作目录', 'Working directory') : guidance ? t('工具使用指令', 'Tool usage guidance') : section.name.replace(/\.md$/i, ''), host = directory;
-          const editable = isAgent ? agent.editable : section.editable !== false && !host, reorderable = !isAgent && !host && section.reorderable !== false;
-          return `<div class="detected-row" data-section-id="${esc(section.name)}" ${reorderable ? `draggable="true" data-drag-section="${esc(section.name)}"` : ''}><div class="detected-source">${reorderable ? `<button type="button" class="drag-handle" title="${t('拖动排序；方向键可上移或下移', 'Drag to reorder; arrow keys move up or down')}" aria-label="${esc(t('调整顺序：', 'Reorder: ') + name)}">${icon('grip')}</button>` : icon('file')}<div class="detected-label"><span class="detected-name">${esc(name)}</span>${guidance ? `<small class="source-note">${t('随启用工具动态更新', 'Updates with enabled tools')}</small>` : isAgent || directory ? `<small class="source-note">${directory ? t('宿主自动载入 · 只读', 'Loaded by the host · Read only') : t('User 级会话上下文', 'User-level conversation context')}</small>` : section.custom ? `<small class="source-note">${t('自定义 · System 级', 'Custom · System level')}</small>` : ''}</div></div><div class="actions"><button type="button" class="section-action" data-section-preview="${esc(section.name)}">${icon('eye')}${t('预览', 'Preview')}</button>${editable ? `<button type="button" class="section-action" data-section-edit="${esc(section.name)}">${icon('edit')}${t('编辑', 'Edit')}</button><label class="switch"><input type="checkbox" data-section-enabled="${esc(section.name)}" aria-label="${esc(t('启用 ', 'Enable ') + name)}" ${section.enabled ? 'checked' : ''}><span class="track"></span></label>` : ''}</div></div>`;
+        const labels = { 'context:file-reference': t('文件引用', 'File references'), 'mcp-resource-servers': t('MCP资源服务器', 'MCP resource servers'), 'ui:deliverable-file-references': t('交付文件引用', 'Deliverable file references'), 'harness:source': t('宿主来源', 'Host source'), 'app:web-surface': t('网页界面', 'Web surface'), 'deployment:persona-suffix': t('补充指令', 'Supplemental instructions'), 'workshop:user-runtime': t('环境', 'Environment'), 'workshop:user-skill': t('技能目录', 'Skill catalog') };
+        const sectionName = section => section.name === 'time-context' ? t('时间与时区', 'Time and time zone') : section.name === 'prompt-manager-catalog' ? t('提示词管理（会话实况）', 'Prompt manager (session context)') : section.name.startsWith('mcp:') ? t(`MCP：${section.name.slice(4)}`, `MCP: ${section.name.slice(4)}`) : section.name === 'workshop:tool-guidance' ? t('工具使用指令', 'Tool usage guidance') : labels[section.name] || section.name.replace(/\.md$/i, '');
+        const row = (section, options = {}) => {
+          const directory = section.name === DIRECTORY_AGENT, guidance = section.managedBy === 'tool-guidance', isAgent = options.agent, userOnly = options.userOnly;
+          const name = isAgent ? 'AGENTS' : directory ? 'AGENTS' : sectionName(section), editable = !userOnly && (isAgent ? agent.editable : section.editable !== false && !directory), reorderable = !userOnly && !isAgent && !directory && section.reorderable !== false;
+          const source = section.source ? t('插件：', 'Plugin: ') + section.source : isAgent ? t('全局级 · 仅当前预设', 'Global · This preset only') : directory ? t('目录级 · 宿主自动载入 · 只读', 'Directory · Host loaded · Read only') : section.custom ? t('自定义 · System 级', 'Custom · System level') : guidance ? t('随启用工具动态更新', 'Updates with enabled tools') : '';
+          return `<div class="detected-row${dragged === section.name ? ' is-dragging' : ''}" data-section-id="${esc(section.name)}" ${reorderable ? `data-drag-section="${esc(section.name)}"` : ''}><div class="detected-source">${reorderable ? `<button type="button" class="drag-handle" draggable="true" title="${t('拖动排序；方向键可上移或下移', 'Drag to reorder; arrow keys move up or down')}" aria-label="${esc(t('调整顺序：', 'Reorder: ') + name)}">${icon('grip')}</button>` : icon('file')}<div class="detected-label"><span class="detected-name">${esc(name)}</span>${source ? `<small class="source-note">${esc(source)}</small>` : ''}</div></div><div class="actions">${section.text !== undefined ? `<button type="button" class="section-action" data-section-preview="${esc(section.name)}">${icon('eye')}${t('预览', 'Preview')}</button>` : ''}${editable ? `<button type="button" class="section-action" data-section-edit="${esc(section.name)}">${icon('edit')}${t('编辑', 'Edit')}</button>` : ''}${editable || section.toggleable ? `<label class="switch"><input type="checkbox" data-section-enabled="${esc(section.name)}" aria-label="${esc(t('启用 ', 'Enable ') + name)}" ${section.enabled ? 'checked' : ''}><span class="track"></span></label>` : ''}</div></div>`;
         };
-        $('section-list').innerHTML = items.map(section => row(section, false)).join('') + (agent ? row({ ...agent, ...(draft.prompt.sections[AGENT] || {}) }, true) : '');
-        if (agent?.directoryText) $('section-list').insertAdjacentHTML('beforeend', row({ name: DIRECTORY_AGENT, text: agent.directoryText, editable: false, reorderable: false }, false));
-        if (state.proxyInjection) $('section-list').insertAdjacentHTML('beforeend', `<p class="source-note proxy-note">${esc(t('部分插件是在代理转发层注入提示词指令（如billion-context），未向 DSH 暴露读取或覆盖接口；此层不包含在工坊预览中。', 'Some plugins inject prompt instructions in their proxy (e.g. billion-context), without a DSH read/override interface. That layer is outside this preview.'))}</p>`);
-        if (!items.some(section => !section.managedBy)) $('section-list').insertAdjacentHTML('beforeend', `<div class="empty-state">${icon('box')}<span>${t('未发现插件注入提示词', 'No injected prompt sections detected')}</span></div>`);
+        const system = items.filter(section => ![AGENT, DIRECTORY_AGENT].includes(section.name));
+        const user = [];
+        if (preview?.runtimeContext) user.push({ name: 'workshop:user-runtime', text: preview.runtimeContext, editable: false });
+        if (preview?.skillPrompt) user.push({ name: 'workshop:user-skill', text: preview.skillPrompt, editable: false });
+        user.push(...(preview?.userSections || []).filter(section => section.name === 'time-context'));
+        user.push(...(preview?.userSections || []).filter(section => section.name !== 'time-context'));
+        if (agent) user.push({ ...agent, ...(draft.prompt.sections[AGENT] || {}) });
+        if (agent?.directoryText) user.push({ name: DIRECTORY_AGENT, text: agent.directoryText, editable: false });
+        $('section-list').innerHTML = `<div class="section-level"><h4>System</h4>${system.map(section => row(section)).join('') || `<div class="empty-state">${icon('box')}<span>${t('未发现 System 内容', 'No System content detected')}</span></div>`}</div><div class="section-level user-level"><h4>User</h4>${user.map(section => row(section, { agent: section.name === AGENT, userOnly: section.name !== AGENT })).join('') || `<div class="empty-state">${icon('box')}<span>${t('暂无 User 级上下文', 'No User context')}</span></div>`}</div>`;
       }
       function renderPreview() {
         if (!preview) return;
         $('preview-summary').textContent = t(`${preview.tools.length} 个工具 · ${preview.skills.length} 个技能 · 约 ${preview.estimatedTokens.toLocaleString()} tokens`, `${preview.tools.length} tools · ${preview.skills.length} skills · ~${preview.estimatedTokens.toLocaleString()} tokens`);
         $('preview-prompt').textContent = preview.displayPrompt;
         const pending = state.sessions.filter(session => session.preset === draft.id && session.pendingTools?.length), selectedPending = preview.runtime?.pendingTools || [];
+        const pendingNames = [...new Set([...pending.flatMap(session => session.pendingTools), ...selectedPending])].filter(Boolean);
         $('runtime-note').hidden = !pending.length && !selectedPending.length;
-        $('runtime-note').textContent = t(`预览为当前方案。${pending.length} 个已开始会话尚未挂载新增或替换工具；关闭并恢复会话后才能使用：${[...new Set([...pending.flatMap(session => session.pendingTools), ...selectedPending])].join('、')}。人设、已有工具过滤与描述、技能选择在下一次请求更新。`, `This preview shows the current preset. ${pending.length} started sessions have not mounted new or replaced tools; close and restore them to use: ${[...new Set([...pending.flatMap(session => session.pendingTools), ...selectedPending])].join(', ')}. Persona, existing-tool filters/descriptions and skill selections update on the next request.`);
+        const restoreNotice = pendingNames.length
+          ? t(`关闭并恢复会话后才能使用：${pendingNames.join('、')}。`, `Close and restore sessions to use: ${pendingNames.join(', ')}.`)
+          : t('关闭并恢复相关会话后才能使用新增或替换的工具。', 'Close and restore the affected sessions to use newly added or replaced tools.');
+        $('runtime-note').textContent = t(`预览为当前方案。${pending.length} 个已开始会话尚未挂载新增或替换工具；${restoreNotice}人设、已有工具过滤与描述、技能选择在下一次请求更新。`, `This preview shows the current preset. ${pending.length} started sessions have not mounted new or replaced tools; ${restoreNotice} Persona, existing-tool filters/descriptions and skill selections update on the next request.`);
         $('runtime-tools').hidden = !preview.runtime;
         $('runtime-tools').textContent = preview.runtime ? t('所选会话实际工具：', 'Actual tools in the selected session: ') + preview.runtime.tools.map(tool => tool.function.name).join('、') : '';
-        $('pane-overview').innerHTML = `<h3>${t('启用的工具', 'Enabled tools')}</h3><div class="chips">${preview.tools.map(tool => `<span class="chip mono">${esc(tool.function.name)}</span>`).join('') || `<span class="muted">${t('尚未启用工具', 'No tools enabled')}</span>`}</div><h3 style="margin-top:12px">${t('绑定的技能', 'Selected skills')}</h3><div class="chips">${preview.skills.map(skill => `<span class="chip">${esc(skill.name)}</span>`).join('') || `<span class="muted">${t('尚未绑定技能', 'No skills selected')}</span>`}</div>${draft.skills.length && !preview.skillCatalog.length ? `<p class="source-note">${preview.tools.some(tool => tool.function.name === 'skill') ? t('所选技能目录尚未发布，请查看技能来源与扫描诊断。', 'The selected skill catalog is unavailable; check source and discovery diagnostics.') : t('尚未开启 skill 工具，技能摘要不会自动发布。', 'The skill tool is disabled, so its catalog is not automatically published.')}</p>` : ''}`;
+        $('pane-overview').innerHTML = `<h3>${t('启用的工具', 'Enabled tools')}</h3><div class="chips">${preview.tools.filter(tool => !tool.function.name.startsWith('mcp__')).map(tool => `<span class="chip mono">${esc(tool.function.name)}</span>`).join('') || `<span class="muted">${t('尚未启用工具', 'No tools enabled')}</span>`}</div><h3 style="margin-top:12px">${t('MCP', 'MCP')}</h3><div class="chips">${(preview.mcp || []).flatMap(server => server.tools).filter(tool => draft.tools.enabled.includes(tool.function?.name ?? tool.name)).map(tool => `<span class="chip mono">${esc(tool.function?.name ?? tool.name)}</span>`).join('') || `<span class="muted">${t('尚未启用 MCP 工具', 'No MCP tools enabled')}</span>`}</div><h3 style="margin-top:12px">${t('绑定的技能', 'Selected skills')}</h3><div class="chips">${preview.skills.map(skill => `<span class="chip">${esc(skill.name)}</span>`).join('') || `<span class="muted">${t('尚未绑定技能', 'No skills selected')}</span>`}</div>${draft.skills.length && !preview.skillCatalog.length ? `<p class="source-note">${preview.tools.some(tool => tool.function.name === 'skill') ? t('所选技能目录尚未发布，请查看技能来源与扫描诊断。', 'The selected skill catalog is unavailable; check source and discovery diagnostics.') : t('尚未开启 skill 工具，技能摘要不会自动发布。', 'The skill tool is disabled, so its catalog is not automatically published.')}</p>` : ''}`;
         $('variable-list').innerHTML = Object.entries(preview.variables).map(([key, value]) => `<div class="variable-row"><code>{{${esc(key)}}}</code><span>${esc(value ?? t('当前未定义', 'Currently undefined'))}</span></div>`).join('');
         if (!cwd) { cwd = preview.cwd; $('preview-cwd').value = cwd; }
       }
@@ -206,7 +239,7 @@ window.__ModuleLoader__.load({
           // The preview is a restricted preset view; keep the global scan inventory intact.
           preview.catalog = result.catalog;
           if (source) { sourceSkills = source.skills; completeSkills = source.complete; }
-          renderPreview(); sections(); tools(); skills(); status();
+          renderPreview(); sections(); tools(); mcp(); skills(); status();
         } catch (error) {
           if (version !== previewVersion || signal.aborted) return;
           preview = undefined; $('preview-prompt').textContent = ''; $('preview-summary').textContent = t('预览失败', 'Preview failed'); report(error); status();
@@ -226,7 +259,7 @@ window.__ModuleLoader__.load({
         if (reset) { base = clone(selected()); draft = clone(base); preview = undefined; }
         pickers(); $('preset-id').value = draft.id; $('preset-description').value = draft.description; $('persona').value = draft.prompt.persona;
         $('preset-enabled').checked = draft.enabled; $('preset-enabled').disabled = draft.builtin; $('delete-preset').disabled = draft.builtin;
-        tools(); skills(); sections(); scanStatus(); status(); renderContextOptions();
+        tools(); skills(); sections(); mcp(); scanStatus(); status(); renderContextOptions();
         const warning = state.roster.find(p => p.id === draft.id)?.broken;
         $('operation-error').textContent = warning || (state.nameConflicts.length ? t('存在与其他插件相同的预设显示名。', 'A preset display name is also used by another plugin.') : '');
       }
@@ -240,11 +273,12 @@ window.__ModuleLoader__.load({
         return true;
       }
       function dialog(title, subtitle, body, handler, label = t('保存', 'Save')) {
+        $('dialog-body').onclick = null; $('dialog-body').oninput = null;
         $('dialog-title').textContent = title; $('dialog-subtitle').textContent = subtitle; $('dialog-body').innerHTML = body;
         $('dialog-save').textContent = label; $('dialog-save').hidden = false; $('dialog-cancel').hidden = false; submit = handler; closePickers(); $('editor-dialog').showModal();
       }
       function closeDialog() { if (dialogPending) return; $('editor-dialog').close(); submit = undefined; }
-      $('editor-dialog').addEventListener('cancel', event => { if (dialogPending) event.preventDefault(); });
+      $('editor-dialog').addEventListener('cancel', event => { event.stopPropagation(); if (dialogPending) event.preventDefault(); });
       $('dialog-close').onclick = closeDialog; $('dialog-cancel').onclick = closeDialog;
       $('editor-dialog').addEventListener('close', () => { submit = undefined; });
       $('editor-dialog').addEventListener('click', event => { if (event.target !== $('editor-dialog')) return; const rect = event.target.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) closeDialog(); });
@@ -257,13 +291,16 @@ window.__ModuleLoader__.load({
         finally { dialogPending = false; for (const id of ['dialog-save', 'dialog-cancel', 'dialog-close']) $(id).disabled = false; }
       };
       function openSection(id, edit) {
-        const section = id === AGENT ? { ...preview.agentInstructions, ...(draft.prompt.sections[AGENT] || {}) } : id === DIRECTORY_AGENT ? { text: preview.agentInstructions.directoryText, editable: false } : supplemental().find(item => item.name === id);
+        let section = id === AGENT ? { ...preview.agentInstructions, ...(draft.prompt.sections[AGENT] || {}) } : id === DIRECTORY_AGENT ? { text: preview.agentInstructions.directoryText, editable: false } : supplemental().find(item => item.name === id);
+        if (id === 'workshop:user-runtime') section = { name: id, text: preview.runtimeContext, editable: false };
+        if (id === 'workshop:user-skill') section = { name: id, text: preview.skillPrompt, editable: false };
+        section ||= preview.userSections?.find(item => item.name === id);
         if (!section) return;
         if (edit && (section.editable === false || section.managedBy === 'host')) return;
-        const name = id === AGENT ? 'AGENT' : id === DIRECTORY_AGENT ? t('AGENT［目录］', 'AGENT [Directory]') : id === 'deployment:persona-suffix' ? t('工作目录', 'Working directory') : id === 'workshop:tool-guidance' ? t('工具使用指令', 'Tool usage guidance') : id.replace(/\.md$/i, '');
+        const name = id === AGENT ? 'AGENTS' : id === DIRECTORY_AGENT ? t('AGENTS（目录级）', 'AGENTS (Directory)') : id === 'time-context' ? t('时间与时区', 'Time and time zone') : id === 'deployment:persona-suffix' ? t('补充指令', 'Supplemental instructions') : id === 'workshop:tool-guidance' ? t('工具使用指令', 'Tool usage guidance') : id.replace(/\.md$/i, '');
         const guidance = id === 'workshop:tool-guidance';
         const editor = guidance ? section.members.map((member, index) => `<label class="field">${esc(member.name)}<textarea class="guidance-editor" data-guidance-member="${index}" spellcheck="false" maxlength="200000">${esc(draft.prompt.sections[member.name]?.text ?? member.text)}</textarea></label>`).join('') : `<textarea class="section-modal-editor" id="section-content" spellcheck="false" maxlength="200000" aria-label="${esc(name)}">${esc(section.text)}</textarea>`;
-        dialog((edit ? t('编辑 ', 'Edit ') : t('预览 ', 'Preview ')) + name, id === AGENT ? t('官方全局 AGENTS.md · 仅覆盖当前预设，保留项目与子目录指令，不修改原文件。', 'Official global AGENTS.md. Edits affect this preset only; project/subdirectory instructions and source files are preserved.') : id === DIRECTORY_AGENT ? t('宿主自动载入当前目录的指令；不与 System 段排序。', 'The host loads directory instructions automatically; they are not System sections.') : guidance ? t('逐段编辑原生工具指令；工具切换时仍会动态增减，工具描述单独管理。', 'Edit native tool instructions individually. Sections still follow tool visibility; schema descriptions are managed separately.') : t('System 级文本；保存后按此顺序生效。', 'System-level text. Save to apply its order.'), edit ? editor + `${section.custom ? `<button type="button" class="text-button danger" id="delete-section">${icon('trash')}${t('删除此内容', 'Delete content')}</button>` : ''}<p id="dialog-error" class="error-message" role="alert"></p>` : `<pre class="preview-code section-preview">${esc((section.renderedText ?? section.text) || t('当前没有内容。', 'No content currently.'))}</pre>`, () => { if (edit) {
+        dialog((edit ? t('编辑 ', 'Edit ') : t('预览 ', 'Preview ')) + name, id === AGENT ? t('官方全局 AGENTS.md · 仅覆盖当前预设，保留项目与子目录指令，不修改原文件。', 'Official global AGENTS.md. Edits affect this preset only; project/subdirectory instructions and source files are preserved.') : id === DIRECTORY_AGENT ? t('宿主自动载入当前目录的指令；不与 System 段排序。', 'The host loads directory instructions automatically; they are not System sections.') : id === 'time-context' ? t('由宿主生成的时间与时区；没有会话实况时展示当前样本，实际值在发送请求时生成。关闭后停止追加，已发送的历史内容保留。', 'Host-generated time and time zone. Without a session snapshot, this shows a current sample; request values are generated when sent. Turning it off stops new readings and preserves history.') : section.delivery === 'user-message' ? t('所选会话中已实际注入的 User 内容，只读。', 'Read-only User content already injected into the selected session.') : guidance ? t('逐段编辑原生工具指令；工具切换时仍会动态增减，工具描述单独管理。', 'Edit native tool instructions individually. Sections still follow tool visibility; schema descriptions are managed separately.') : t('System 级文本；保存后按此顺序生效。', 'System-level text. Save to apply its order.'), edit ? editor + `${section.custom ? `<button type="button" class="text-button danger" id="delete-section">${icon('trash')}${t('删除此内容', 'Delete content')}</button>` : ''}<p id="dialog-error" class="error-message" role="alert"></p>` : `<pre class="preview-code section-preview">${esc((section.renderedText ?? section.text) || t('当前没有内容。', 'No content currently.'))}</pre>`, () => { if (edit) {
           if (guidance) root.querySelectorAll('[data-guidance-member]').forEach(el => { const member = section.members[Number(el.dataset.guidanceMember)]; draft.prompt.sections[member.name] = { text: el.value, order: member.order, enabled: draft.prompt.sections[member.name]?.enabled ?? true }; });
           draft.prompt.sections[id] = { ...(section.custom ? { custom: true } : {}), text: guidance ? '' : $('section-content').value, order: section.order, enabled: section.enabled }; sections(); changed();
         } }, edit ? t('完成', 'Done') : t('关闭', 'Close'));
@@ -279,7 +316,7 @@ window.__ModuleLoader__.load({
         const tool = toolSource(name);
         if (!tool?.schema) return;
         const schema = draft.tools.overrides[name]?.schema || tool.schema;
-        dialog(t('工具描述', 'Tool description'), name, `<p class="risk risk-inline">${icon('notice')}<span>${t('请确保您了解 AI 与提示词的机制，否则请不要修改；您的任何修改导致的后果由您个人承担。', 'Only edit if you understand AI and prompts. You are responsible for the consequences.')}</span></p><textarea class="json-editor" id="tool-json" spellcheck="false" aria-label="${esc(name)} JSON" aria-describedby="dialog-error">${esc(JSON.stringify(schema, null, 2))}</textarea><div class="json-tools"><span class="muted">${t('如果您想调整描述，建议仅修改 description，名称和参数结构保持不变。避免出现兼容问题', 'To adjust descriptions, edit description fields only and keep names and parameter structure unchanged to avoid compatibility issues.')}</span><button type="button" class="text-button" id="format-json">${t('格式化', 'Format')}</button></div><p class="error-message" id="dialog-error" role="alert" aria-live="assertive"></p>`, async () => {
+        dialog(t('工具描述', 'Tool description'), name, `<p class="risk risk-inline">${icon('notice')}<span>${t('请确保您了解 AI 与提示词的机制，否则请不要修改；您的任何修改导致的后果由您个人承担。', 'Only edit if you understand AI and prompts. You are responsible for the consequences.')}</span></p><textarea class="json-editor" id="tool-json" spellcheck="false" aria-label="${esc(name)} JSON" aria-describedby="dialog-error">${esc(JSON.stringify(schema, null, 2))}</textarea><div class="json-tools"><span class="muted">${t('如果您想调整，建议仅修改 description，名称和参数结构保持不变。避免出现兼容问题', 'To adjust descriptions, edit descriptions only and keep names and parameter structure unchanged.')}</span><button type="button" class="text-button" id="format-json">${t('格式化', 'Format')}</button></div><p class="error-message" id="dialog-error" role="alert" aria-live="assertive"></p>`, async () => {
           let value; try { value = JSON.parse($('tool-json').value); } catch (error) { throw Error(t('JSON 格式有误：', 'Invalid JSON: ') + error.message); }
           const tools = clone(base.tools); tools.overrides[name] = { schema: value };
           // Server validates against the selected source's original schema.
@@ -287,9 +324,169 @@ window.__ModuleLoader__.load({
         });
         $('format-json').onclick = () => { try { $('tool-json').value = JSON.stringify(JSON.parse($('tool-json').value), null, 2); $('dialog-error').textContent = ''; $('tool-json').removeAttribute('aria-invalid'); } catch (error) { $('dialog-error').textContent = error.message; $('tool-json').setAttribute('aria-invalid', 'true'); } };
       }
+      async function acceptMcpChange(nextState, removedServerName) {
+        const pending = clone(draft);
+        state = nextState;
+        base = clone(state.presets.find(p => p.id === pending.id));
+        const mcp = clone(base.mcp).map(server => {
+          const previous = pending.mcp.find(item => item.serverName === server.serverName);
+          return previous?.enabled !== undefined ? { ...server, enabled: previous.enabled } : server;
+        });
+        const owner = name => [...pending.mcp, ...(state.catalog.mcpServers || [])].filter(server => name.startsWith(`mcp__${server.serverName}__`)).sort((a, b) => b.serverName.length - a.serverName.length)[0]?.serverName;
+        const enabled = pending.tools.enabled.filter(name => !removedServerName || owner(name) !== removedServerName);
+        draft = { ...pending, mcp, mcpEnabled: clone(pending.mcpEnabled ?? base.mcpEnabled ?? {}), revision: base.revision, tools: { ...pending.tools, enabled } };
+        render(false); await refreshPreview(true);
+      }
+      function openMcpEditor(server) {
+        const editing = Boolean(server);
+        let config = server ? Object.fromEntries(Object.entries(clone(draft.mcp.find(item => item.serverName === server.serverName) || server)).filter(([key]) => !['source', 'tools'].includes(key))) : { serverName: '', transport: 'stdio', command: '', args: [], env: {}, cwd: '' };
+        const transportDrafts = {
+          stdio: config.transport === 'stdio' ? clone(config) : { serverName: config.serverName, transport: 'stdio', command: '', args: [], env: {}, cwd: config.cwd || '' },
+          'streamable-http': config.transport === 'streamable-http' ? clone(config) : { serverName: config.serverName, transport: 'streamable-http', url: '', headers: {}, cwd: config.cwd || '' },
+        };
+        let jsonMode = false, probeVersion = 0;
+        const transportRows = {};
+        const argument = value => `<div class="kv-row" data-mcp-arg><input class="kv-value" data-mcp-arg-value aria-label="${t('参数', 'Argument')}" value="${esc(value)}"><button type="button" class="icon-button ghost" data-mcp-remove aria-label="${t('删除参数', 'Remove argument')}">${icon('close')}</button></div>`;
+        const pair = (key, value, visible = false) => {
+          const expression = Boolean(value && typeof value === 'object' && typeof value.__jsExpr === 'string' && Object.keys(value).length === 1);
+          const text = typeof value === 'string' ? value : expression ? value.__jsExpr : JSON.stringify(value ?? '');
+          return `<div class="kv-row" data-mcp-kv><input class="kv-key" data-mcp-key aria-label="${t('名称', 'Name')}" placeholder="${t('名称', 'Name')}" value="${esc(key)}"><input class="kv-value" data-mcp-value aria-label="${t('值', 'Value')}" placeholder="${t('值', 'Value')}" type="${visible ? 'text' : 'password'}" value="${esc(text)}"><label class="expression-option"><input type="checkbox" data-mcp-expression ${expression ? 'checked' : ''}>${t('表达式', 'Expression')}</label><button type="button" class="icon-button ghost" data-mcp-reveal aria-label="${t(visible ? '隐藏值' : '显示值', visible ? 'Hide value' : 'Show value')}" title="${t(visible ? '隐藏值' : '显示值', visible ? 'Hide value' : 'Show value')}" aria-pressed="${visible}">${icon(visible ? 'eye-off' : 'eye')}</button><button type="button" class="icon-button ghost" data-mcp-remove aria-label="${t('删除此行', 'Remove row')}">${icon('close')}</button></div>`;
+        };
+        const read = (allowIncomplete = false) => {
+          if (jsonMode) {
+            let value; try { value = JSON.parse($('mcp-json').value); } catch (error) { throw Error(t('JSON 格式有误：', 'Invalid JSON: ') + error.message); }
+            if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error(t('JSON 需要是一台 MCP 的配置对象。', 'JSON must be one MCP configuration object.'));
+            return value;
+          }
+          const value = { ...clone(config), serverName: $('mcp-server').value.trim() };
+          const entries = [...root.querySelectorAll('[data-mcp-kv]')].map(row => {
+            const key = row.querySelector('[data-mcp-key]').value.trim(), text = row.querySelector('[data-mcp-value]').value;
+            if (!key && !allowIncomplete) throw Error(t('请填写名称，或删除空行。', 'Enter a name or remove the empty row.'));
+            if (!key) return undefined;
+            return [key, row.querySelector('[data-mcp-expression]').checked ? { __jsExpr: text } : text];
+          });
+          const completeEntries = entries.filter(Boolean);
+          if (!allowIncomplete && new Set(completeEntries.map(([key]) => key)).size !== completeEntries.length) throw Error(t('环境变量或请求头的名称不能重复。', 'Variable or header names must be unique.'));
+          if (value.transport === 'stdio') { value.command = $('mcp-command').value.trim(); value.args = [...root.querySelectorAll('[data-mcp-arg-value]')].map(input => input.value); value.env = Object.fromEntries(completeEntries); value.cwd ??= ''; delete value.url; delete value.headers; }
+          else { value.url = $('mcp-url').value.trim(); value.headers = Object.fromEntries(completeEntries); for (const key of ['command', 'args', 'env']) delete value[key]; }
+          return value;
+        };
+        const drawForm = () => {
+          const stdio = config.transport === 'stdio';
+          const rows = transportRows[config.transport];
+          const args = rows?.args ?? config.args ?? [];
+          const pairs = rows?.pairs ?? Object.entries((stdio ? config.env : config.headers) || {}).map(([key, value]) => ({ key, value }));
+          $('mcp-form-view').innerHTML = `<label class="field">${t('名称', 'Name')}<input id="mcp-server" pattern="[A-Za-z0-9_-]{1,32}" required value="${esc(config.serverName)}" placeholder="${t('例如：tavily', 'For example: tavily')}" ${editing ? 'readonly' : ''}></label><div class="field"><span>${t('连接方式', 'Transport')}</span><div class="segmented"><button type="button" data-mcp-transport="stdio" aria-pressed="${stdio}" class="${stdio ? 'active' : ''}">${t('本地命令（stdio）', 'Local command (stdio)')}</button><button type="button" data-mcp-transport="streamable-http" aria-pressed="${!stdio}" class="${stdio ? '' : 'active'}">HTTP</button></div></div>${stdio ? `<label class="field">${t('命令', 'Command')}<input id="mcp-command" required placeholder="${t('只写程序，例如 npx 或 uvx；参数写在下面', 'Program only, such as npx or uvx; add arguments below')}" value="${esc(config.command || '')}"></label><div class="field"><span>${t('参数', 'Arguments')}</span><div id="mcp-args-list">${args.map(argument).join('')}</div><button type="button" class="text-button" data-mcp-add-arg>${icon('plus')}${t('添加参数', 'Add argument')}</button></div>` : `<label class="field">URL<input id="mcp-url" type="url" required placeholder="https://mcp.example.com/mcp" value="${esc(config.url || '')}"></label>`}<div class="field"><span>${t(stdio ? '环境变量' : '请求头', stdio ? 'Environment variables' : 'Request headers')}</span><div id="mcp-pairs-list">${pairs.map(row => pair(row.key, row.expression ? { __jsExpr: row.value } : row.value, row.visible)).join('')}</div><button type="button" class="text-button" data-mcp-add-pair>${icon('plus')}${t(stdio ? '添加环境变量' : '添加请求头', stdio ? 'Add variable' : 'Add header')}</button></div>`;
+        };
+        const resizeMcpJson = () => {
+          const editor = $('mcp-json');
+          editor.style.height = 'auto';
+          editor.style.height = Math.min(editor.scrollHeight, 370, Math.floor(window.innerHeight * .45)) + 'px';
+        };
+        const resetProbe = () => { probeVersion++; const output = $('mcp-probe-status'); output.className = 'probe-state muted'; output.textContent = t('未检测', 'Not tested'); };
+        dialog(editing ? t('编辑 MCP', 'Edit MCP') : t('添加 MCP', 'Add MCP'), t('仅当前预设可用', 'Available only to this preset'), `<div class="mcp-config-head"><span>${t('连接配置', 'Connection configuration')}</span><div class="segmented"><button type="button" data-mcp-mode="form" class="active" aria-pressed="true">${t('表单', 'Form')}</button><button type="button" data-mcp-mode="json" aria-pressed="false">JSON</button></div></div><div id="mcp-form-view"></div><div id="mcp-json-view" hidden><label class="field">JSON<textarea id="mcp-json" class="json-editor mcp-json-editor" spellcheck="false"></textarea></label></div><p class="source-note">${t('值保存在当前预设配置中；勾选“表达式”可引用 process.env。', 'Values are stored in this preset; select “Expression” to reference process.env.')}</p><div class="probe-actions"><button type="button" data-mcp-probe>${t('检测工具', 'Detect tools')}</button><span id="mcp-probe-status" class="probe-state muted" role="status">${t('未检测', 'Not checked')}</span></div><p class="source-note" id="mcp-probe-help">${t('检测会连接服务器并读取工具清单，不会调用工具或保存配置。', 'Connects to the server and reads its tool list. It does not call tools or save the configuration.')}</p>${dialogError}`, async () => {
+          const next = read();
+          if (editing && next.serverName !== server.serverName) throw Error(t('名称不可修改。', 'The name cannot be changed.'));
+          if (editing) {
+            next.enabled = base.mcp.find(item => item.serverName === server.serverName)?.enabled;
+            if (next.enabled === undefined) delete next.enabled;
+          }
+          const result = await request(editing ? 'mcp-update' : 'mcp-create', { id: base.id, revision: base.revision, ...(editing ? { serverName: server.serverName } : {}), server: next });
+          await acceptMcpChange(result); toast(t('MCP 配置已保存。', 'MCP configuration saved.'));
+        }, editing ? t('保存', 'Save') : t('添加', 'Add'));
+        drawForm();
+        $('dialog-body').oninput = event => { resetProbe(); if (event.target.id === 'mcp-json') resizeMcpJson(); };
+        $('dialog-body').onclick = async event => {
+          const button = event.target.closest('button');
+          if (!button) return;
+          try {
+            if (button.dataset.mcpMode) {
+              const nextJson = button.dataset.mcpMode === 'json';
+              if (jsonMode === nextJson) return;
+              config = read();
+              if (!['stdio', 'streamable-http'].includes(config.transport)) throw Error(t('仅支持 stdio 或 streamable-http。', 'Only stdio and streamable-http are supported.'));
+              transportRows[config.transport] = undefined;
+              transportDrafts[config.transport] = clone(config);
+              jsonMode = nextJson;
+              if (jsonMode) $('mcp-json').value = JSON.stringify(config, null, 2); else drawForm();
+              $('mcp-form-view').hidden = jsonMode; $('mcp-json-view').hidden = !jsonMode;
+              $('mcp-json').disabled = !jsonMode;
+              if (jsonMode) resizeMcpJson();
+              root.querySelectorAll('#mcp-form-view input').forEach(input => { input.disabled = jsonMode; });
+              root.querySelectorAll('[data-mcp-mode]').forEach(item => { item.classList.toggle('active', item === button); item.setAttribute('aria-pressed', String(item === button)); });
+            }
+            if (button.dataset.mcpTransport) {
+              const current = read(true), transport = button.dataset.mcpTransport;
+              transportDrafts[current.transport] = clone(current);
+              transportRows[current.transport] = {
+                args: [...root.querySelectorAll('[data-mcp-arg-value]')].map(input => input.value),
+                pairs: [...root.querySelectorAll('[data-mcp-kv]')].map(row => ({
+                  key: row.querySelector('[data-mcp-key]').value,
+                  value: row.querySelector('[data-mcp-value]').value,
+                  expression: row.querySelector('[data-mcp-expression]').checked,
+                  visible: row.querySelector('[data-mcp-value]').type === 'text',
+                })),
+              };
+              config = { ...clone(transportDrafts[transport]), serverName: current.serverName, transport };
+              drawForm(); resetProbe();
+            }
+            if (button.hasAttribute('data-mcp-add-arg')) { $('mcp-args-list').insertAdjacentHTML('beforeend', argument('')); resetProbe(); }
+            if (button.hasAttribute('data-mcp-add-pair')) { $('mcp-pairs-list').insertAdjacentHTML('beforeend', pair('', '')); resetProbe(); }
+            if (button.hasAttribute('data-mcp-remove')) { button.closest('.kv-row').remove(); resetProbe(); }
+            if (button.hasAttribute('data-mcp-reveal')) { const input = button.closest('.kv-row').querySelector('[data-mcp-value]'), visible = input.type === 'password'; input.type = visible ? 'text' : 'password'; button.setAttribute('aria-pressed', String(visible)); button.setAttribute('aria-label', t(visible ? '隐藏值' : '显示值', visible ? 'Hide value' : 'Show value')); button.title = t(visible ? '隐藏值' : '显示值', visible ? 'Hide value' : 'Show value'); button.innerHTML = icon(visible ? 'eye-off' : 'eye'); }
+            if (button.hasAttribute('data-mcp-probe')) {
+              const input = read(), version = ++probeVersion, output = $('mcp-probe-status');
+              output.className = 'probe-state'; output.textContent = t('检测中…', 'Checking…');
+              try {
+                const result = await request('mcp-probe', { server: input, language: english ? 'en' : 'zh' });
+                if (version !== probeVersion || output !== $('mcp-probe-status') || !$('editor-dialog').open) return;
+                output.className = 'probe-state ' + (result.ok ? 'success' : 'error'); output.textContent = result.message;
+              } catch (error) { if (version === probeVersion && output === $('mcp-probe-status')) { output.className = 'probe-state error'; output.textContent = error.message; } }
+            }
+            if ($('dialog-error')) $('dialog-error').textContent = '';
+          } catch (error) { $('dialog-error').textContent = error.message; }
+        };
+      }
+      function previewMcp(server) {
+        let version = 0;
+        const config = server.config || server;
+        const revealedHeaders = new Set();
+        const valueText = value => value && typeof value === 'object' && typeof value.__jsExpr === 'string' ? value.__jsExpr : typeof value === 'string' ? value : JSON.stringify(value ?? '');
+        const field = (label, value) => `<div class="mcp-preview-field"><span>${label}</span><code>${esc(value || t('未设置', 'Not set'))}</code></div>`;
+        const entries = values => Object.entries(values || {}).map(([key, value]) => `<div class="mcp-preview-entry"><code>${esc(key)}</code><span>${esc(valueText(value))}</span></div>`).join('') || `<span class="muted">${t('未设置', 'Not set')}</span>`;
+        const headerEntries = Object.entries(config.headers || {}).map(([key, value], index) => `<div class="mcp-preview-entry has-reveal"><code>${esc(key)}</code><span class="mcp-preview-secret" data-mcp-preview-secret="${index}">${revealedHeaders.has(index) ? esc(valueText(value)) : '••••••'}</span><button type="button" class="icon-button ghost" data-mcp-preview-reveal="${index}" aria-label="${esc(t('显示请求头值', 'Show header value'))}" title="${esc(t('显示请求头值', 'Show header value'))}" aria-pressed="false">${icon('eye')}</button></div>`).join('') || `<span class="muted">${t('未设置', 'Not set')}</span>`;
+        const stdio = config.transport === 'stdio', http = config.transport === 'streamable-http';
+        const transport = stdio ? t('本地命令（stdio）', 'Local command (stdio)') : http ? 'Streamable HTTP' : t('未识别', 'Unidentified');
+        const details = stdio ? `${field(t('命令', 'Command'), config.command)}${field(t('工作目录', 'Working directory'), config.cwd)}<div class="mcp-preview-field"><span>${t('参数', 'Arguments')}</span><div class="mcp-preview-entries">${config.args?.length ? config.args.map(value => `<div class="mcp-preview-entry"><code>${esc(value)}</code></div>`).join('') : `<span class="muted">${t('未设置', 'Not set')}</span>`}</div></div><div class="mcp-preview-field"><span>${t('环境变量', 'Environment variables')}</span><div class="mcp-preview-entries">${entries(config.env)}</div></div>` : http ? `${field('URL', config.url)}<div class="mcp-preview-field"><span>${t('请求头', 'Request headers')}</span><div class="mcp-preview-entries">${headerEntries}</div></div>` : '';
+        const connection = `<div class="mcp-preview-config">${field(t('名称', 'Name'), server.serverName)}${field(t('连接方式', 'Transport'), transport)}${details}</div>`;
+        dialog(t('MCP 预览', 'MCP preview'), server.serverName || t('来源未识别', 'Unidentified source'), `${connection}<p class="source-note">${t('连接状态与工具数量，以检测结果为准。', 'Detect tools to check the connection and tool count.')}</p><div class="probe-actions"><button type="button" data-mcp-preview-probe ${server.source === 'unknown' ? 'disabled' : ''}>${t('检测', 'Detect')}</button><span class="probe-state muted" id="mcp-preview-status" role="status">${server.tools.length} ${t('个工具', 'tools')}</span></div><div class="mcp-tools">${server.tools.map(tool => `<span class="chip mono">${esc(tool.function?.name ?? tool.name)}</span>`).join('')}</div>${dialogError}`, () => {}, t('关闭', 'Close'));
+        $('dialog-cancel').hidden = true;
+        $('dialog-body').onclick = async event => {
+          const reveal = event.target.closest('[data-mcp-preview-reveal]');
+          if (reveal) {
+            const index = Number(reveal.dataset.mcpPreviewReveal), visible = !revealedHeaders.has(index), value = Object.entries(config.headers || {})[index]?.[1];
+            if (visible) revealedHeaders.add(index); else revealedHeaders.delete(index);
+            $('dialog-body').querySelector(`[data-mcp-preview-secret="${index}"]`).textContent = visible ? valueText(value) : '••••••';
+            reveal.setAttribute('aria-pressed', String(visible)); reveal.setAttribute('aria-label', t(visible ? '隐藏请求头值' : '显示请求头值', visible ? 'Hide header value' : 'Show header value')); reveal.title = t(visible ? '隐藏请求头值' : '显示请求头值', visible ? 'Hide header value' : 'Show header value'); reveal.innerHTML = icon(visible ? 'eye-off' : 'eye');
+            return;
+          }
+          if (!event.target.closest('[data-mcp-preview-probe]')) return;
+          const output = $('mcp-preview-status'), current = ++version;
+          output.textContent = t('检测中…', 'Checking…');
+          try {
+            const result = await request('mcp-probe', { id: base.id, serverName: server.serverName, ...(server.source === 'preset' ? { server: draft.mcp.find(item => item.serverName === server.serverName) } : {}), language: english ? 'en' : 'zh' });
+            if (current !== version || output !== $('mcp-preview-status') || !$('editor-dialog').open) return;
+            output.textContent = result.message;
+          } catch (error) { if (output === $('mcp-preview-status')) output.textContent = error.message; }
+        };
+      }
+      function removeMcp(server) {
+        dialog(t('删除 MCP 服务器', 'Delete MCP server'), t('仅删除当前预设中的连接配置。', 'Only this preset connection will be removed.'), `<p>${t(`将删除「${server.serverName}」及其已启用工具。消息历史不受影响。`, `“${server.serverName}” and its enabled tools will be removed. Message history is unaffected.`)}</p>${dialogError}`, async () => { const result = await request('mcp-delete', { id: base.id, revision: base.revision, serverName: server.serverName }); await acceptMcpChange(result, server.serverName); toast(t('MCP 已删除。', 'MCP deleted.')); }, t('删除', 'Delete'));
+      }
       root.addEventListener('input', event => { if (event.target.id === 'tool-json') { $('dialog-error').textContent = ''; event.target.removeAttribute('aria-invalid'); } });
       async function select(id) { state = await request('settings', { changes: { selectedPresetId: id } }); render(); await refreshPreview(true); }
       root.addEventListener('click', event => {
+        if (event.target.closest('.tooltip-wrap')) { event.preventDefault(); event.stopPropagation(); return; }
         const contextOption = event.target.closest('[data-context-session]');
         if (contextOption) { sessionId = contextOption.dataset.contextSession; closePickers(); renderContextOptions(); refreshPreview(true); return; }
         const option = event.target.closest('[data-preset-value],[data-fallback-value]');
@@ -305,6 +502,12 @@ window.__ModuleLoader__.load({
         }
         if (!event.target.closest('.select-card')) closePickers();
         const button = event.target.closest('button');
+        if (button?.hasAttribute('data-mcp-preview')) { const server = preview?.mcp.find(item => item.serverName === button.dataset.mcpPreview); if (server) previewMcp(server); return; }
+        const editMcp = button?.dataset.mcpEdit && preview?.mcp.find(server => server.serverName === button.dataset.mcpEdit);
+        if (editMcp) { event.preventDefault(); event.stopPropagation(); openMcpEditor(editMcp); return; }
+        const deleteMcp = button?.dataset.mcpDelete && preview?.mcp.find(server => server.serverName === button.dataset.mcpDelete);
+        if (deleteMcp) { event.preventDefault(); event.stopPropagation(); removeMcp(deleteMcp); return; }
+        if (button?.id === 'create-mcp') { event.preventDefault(); event.stopPropagation(); openMcpEditor(); return; }
         if (button?.dataset.description) openTool(button.dataset.description);
         if (button?.dataset.sectionPreview) openSection(button.dataset.sectionPreview, false);
         if (button?.dataset.sectionEdit) openSection(button.dataset.sectionEdit, true);
@@ -312,6 +515,7 @@ window.__ModuleLoader__.load({
       });
       root.querySelectorAll('.select-card').forEach(picker => picker.addEventListener('toggle', () => { picker.querySelector('summary').setAttribute('aria-expanded', String(picker.open)); if (picker.open) root.querySelectorAll('.select-card').forEach(other => { if (other !== picker) other.open = false; }); }));
       root.addEventListener('keydown', event => {
+        if (event.target.closest('summary .tooltip-wrap') && ['Enter', ' '].includes(event.key)) { event.preventDefault(); return; }
         if (event.key === 'Escape') closePickers();
         const picker = event.target.closest('.select-card');
         if (picker && ['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) { event.preventDefault(); picker.open = true; const all = [...picker.querySelectorAll('.select-option')], index = all.indexOf(root.activeElement); all[event.key === 'Home' ? 0 : event.key === 'End' ? all.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : all.length - 1)) % all.length]?.focus(); }
@@ -320,10 +524,17 @@ window.__ModuleLoader__.load({
       });
       root.addEventListener('change', event => {
         const el = event.target;
-        if (el.dataset.tool) { const tool = toolSource(el.dataset.tool); if (!tool) return; const key = tool.light === false ? 'packages' : 'enabled', name = tool.light === false ? tool.package : tool.name; draft.tools[key] = el.checked ? [...new Set([...draft.tools[key], name])] : draft.tools[key].filter(x => x !== name); tools(); changed(); }
+        if (el.dataset.tool) { const tool = toolSource(el.dataset.tool); if (!tool) return; const key = tool.light === false ? 'packages' : 'enabled', name = tool.light === false ? tool.package : tool.name; draft.tools[key] = el.checked ? [...new Set([...draft.tools[key], name])] : draft.tools[key].filter(x => x !== name); tools(); mcp(); changed(); }
+        if (el.dataset.mcpEnabled) {
+          const server = preview?.mcp.find(item => item.serverName === el.dataset.mcpEnabled);
+          if (!server || server.tools.some(tool => draft.tools.enabled.includes(tool.function?.name ?? tool.name))) { mcp(); return; }
+          if (server.source === 'preset') draft.mcp = draft.mcp.map(item => item.serverName === server.serverName ? { ...item, enabled: el.checked } : item);
+          else draft.mcpEnabled = { ...draft.mcpEnabled, [server.serverName]: el.checked };
+          mcp(); changed();
+        }
         if (el.dataset.package) { draft.tools.packages = el.checked ? [...new Set([...draft.tools.packages, el.dataset.package])] : draft.tools.packages.filter(x => x !== el.dataset.package); tools(); changed(); }
         if (el.dataset.skill) { draft.skills = el.checked ? [...new Set([...draft.skills, el.dataset.skill])] : draft.skills.filter(x => x !== el.dataset.skill); if (el.checked && toolSource('skill')?.available) draft.tools.enabled = [...new Set([...draft.tools.enabled, 'skill'])]; tools(); changed(); }
-        if (el.dataset.sectionEnabled) { const id = el.dataset.sectionEnabled, section = id === AGENT ? { ...preview.agentInstructions, ...(draft.prompt.sections[AGENT] || {}) } : supplemental().find(s => s.name === id); draft.prompt.sections[id] = { ...(section.custom ? { custom: true } : {}), text: id === 'workshop:tool-guidance' ? '' : section.text, order: section.order, enabled: el.checked }; changed(); }
+        if (el.dataset.sectionEnabled) { const id = el.dataset.sectionEnabled, section = id === AGENT ? { ...preview.agentInstructions, ...(draft.prompt.sections[AGENT] || {}) } : id === 'time-context' ? preview.userSections.find(s => s.name === id) : supplemental().find(s => s.name === id); draft.prompt.sections[id] = { ...(section.custom ? { custom: true } : {}), text: ['workshop:tool-guidance', 'time-context'].includes(id) ? '' : section.text, order: section.order, enabled: el.checked }; changed(); }
       });
       function move(source, target, before) {
         const all = supplemental(), items = all.filter(s => s.reorderable !== false && s.managedBy !== 'host'), slots = items.map(s => s.order), item = items.find(s => s.name === source);
@@ -342,15 +553,13 @@ window.__ModuleLoader__.load({
         reordered.forEach((s, i) => { draft.prompt.sections[s.name] = { ...(s.custom ? { custom: true } : {}), text: s.name === 'workshop:tool-guidance' ? '' : s.text, enabled: s.enabled, order: slots[i] }; });
         sections(); changed();
       }
-      $('section-list').addEventListener('dragstart', event => { const row = event.target.closest('[data-drag-section]'); if (!row) return; dragged = row.dataset.dragSection; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', dragged); const rect = row.getBoundingClientRect(); event.dataTransfer.setDragImage(row, event.clientX - rect.left, event.clientY - rect.top); });
-      $('section-list').addEventListener('dragover', event => { const row = event.target.closest('[data-section-id]'); if (dragged && row && row.dataset.sectionId !== AGENT) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; } });
-      $('section-list').addEventListener('drop', event => { const row = event.target.closest('[data-section-id]'); if (dragged && row && row.dataset.sectionId !== AGENT) { event.preventDefault(); move(dragged, row.dataset.sectionId, event.clientY < row.getBoundingClientRect().top + row.offsetHeight / 2); } dragged = undefined; });
-      $('section-list').addEventListener('dragend', () => { dragged = undefined; });
+      $('section-list').addEventListener('dragstart', event => { const handle = event.target.closest('.drag-handle'), row = handle?.closest('[data-drag-section]'); if (!row) { event.preventDefault(); return; } dragged = row.dataset.dragSection; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', dragged); row.classList.add('is-dragging'); });
+      $('section-list').addEventListener('dragover', event => { const row = event.target.closest('[data-section-id]'), source = dragged && root.querySelector(`[data-section-id="${CSS.escape(dragged)}"]`); if (!dragged || !row || row.dataset.sectionId === AGENT || row.dataset.sectionId === dragged || source?.closest('.section-level') !== row.closest('.section-level')) return; event.preventDefault(); event.dataTransfer.dropEffect = 'move'; root.querySelectorAll('.drag-before,.drag-after').forEach(item => item.classList.remove('drag-before', 'drag-after')); row.classList.add(event.clientY < row.getBoundingClientRect().top + row.offsetHeight / 2 ? 'drag-before' : 'drag-after'); });
+      $('section-list').addEventListener('drop', event => { const row = event.target.closest('[data-section-id]'), source = dragged && root.querySelector(`[data-section-id="${CSS.escape(dragged)}"]`); if (dragged && row && row.dataset.sectionId !== AGENT && row.dataset.sectionId !== dragged && source?.closest('.section-level') === row.closest('.section-level')) { event.preventDefault(); move(dragged, row.dataset.sectionId, event.clientY < row.getBoundingClientRect().top + row.offsetHeight / 2); } dragged = undefined; sections(); });
+      $('section-list').addEventListener('dragend', event => { event.target.closest('[data-drag-section]')?.classList.remove('is-dragging'); root.querySelectorAll('.drag-before,.drag-after').forEach(item => item.classList.remove('drag-before', 'drag-after')); dragged = undefined; });
       $('persona').oninput = event => { draft.prompt.persona = event.target.value; changed(); };
       $('preset-description').oninput = event => { draft.description = event.target.value; status(); };
-      $('save-preset').onclick = () => run(() => save({ name: draft.name, description: draft.description, prompt: draft.prompt, tools: draft.tools, skills: draft.skills }));
-      $('save-prompt').onclick = () => run(() => save({ prompt: draft.prompt }));
-      $('cancel-prompt').onclick = () => { draft.prompt = clone(base.prompt); $('persona').value = draft.prompt.persona; changed(); refreshPreview(); };
+      $('save-preset').onclick = () => run(() => save({ name: draft.name, description: draft.description, prompt: draft.prompt, tools: draft.tools, skills: draft.skills, mcp: draft.mcp, mcpEnabled: draft.mcpEnabled }));
       const dialogError = '<p id="dialog-error" class="error-message" role="alert"></p>';
       $('add-section').onclick = () => dialog(t('新建内容', 'New content'), t('添加可排序的 System 级文本；不会修改其他插件或 AGENT。', 'Add sortable System-level text to this preset.'), `<label class="field">${t('名称', 'Name')}<input id="new-section-name" maxlength="256" required></label><label class="field">${t('内容', 'Content')}<textarea class="section-modal-editor" id="section-content" maxlength="200000" required></textarea></label>${dialogError}`, () => {
         const name = $('new-section-name').value.trim();
@@ -372,15 +581,22 @@ window.__ModuleLoader__.load({
       $('scan-tools').onclick = () => run(async () => {
         state = await request('scan', { id: draft.id, ...context() }); tools(); scanStatus(); await refreshPreview(true);
         const count = state.catalog.counts;
-        toast(t(`扫描完成：${count.tools} 个工具、${count.promptSections} 个提示词段、${count.skills} 个技能${count.complete ? '' : '（技能扫描未完整）'}。`, `Scan complete: ${count.tools} tools, ${count.promptSections} prompt sections, ${count.skills} skills${count.complete ? '' : ' (skill discovery incomplete)'}.`));
+        toast(t(`扫描完成：${count.tools} 个工具（MCP：${count.mcpServers} 个服务、${count.mcpTools} 个工具）、${count.promptSections} 个提示词段、${count.skills} 个技能${count.complete ? '' : '（技能扫描未完整）'}。`, `Scan complete: ${count.tools} tools (MCP: ${count.mcpServers} services, ${count.mcpTools} tools), ${count.promptSections} prompt sections, ${count.skills} skills${count.complete ? '' : ' (skill discovery incomplete)'}.`));
       });
-      $('skills-all').onclick = () => { draft.skills = [...new Set([...draft.skills, ...sourceSkills.map(skill => skill.name)])]; if (draft.skills.length && toolSource('skill')?.available) draft.tools.enabled = [...new Set([...draft.tools.enabled, 'skill'])]; skills(); tools(); changed(); };
-      $('skills-none').onclick = () => { draft.skills = []; skills(); changed(); };
+      $('skills-all').onclick = () => { const all = [...sourceSkills.map(skill => skill.name), ...draft.skills]; const complete = all.length > 0 && all.every(name => draft.skills.includes(name)); draft.skills = complete ? [] : [...new Set(all)]; if (draft.skills.length && toolSource('skill')?.available) draft.tools.enabled = [...new Set([...draft.tools.enabled, 'skill'])]; skills(); tools(); changed(); };
+      if ($('skills-none')) $('skills-none').onclick = () => { draft.skills = []; skills(); changed(); };
       $('preview-cwd').oninput = event => { cwd = event.target.value.trim(); previewVersion++; clearTimeout(previewTimer); $('copy-preview').disabled = true; previewTimer = setTimeout(() => refreshPreview(true), 350); };
       root.querySelectorAll('[data-tab]').forEach(button => { button.onclick = () => { root.querySelectorAll('[data-tab]').forEach(tab => { tab.classList.toggle('active', tab === button); tab.setAttribute('aria-selected', String(tab === button)); }); $('pane-overview').hidden = button.dataset.tab !== 'overview'; $('pane-prompt').hidden = button.dataset.tab !== 'prompt'; }; });
       async function copy(text) { try { await navigator.clipboard.writeText(text); } catch { const area = document.createElement('textarea'); area.value = text; area.style.cssText = 'position:fixed;left:-9999px'; root.append(area); area.select(); const ok = document.execCommand('copy'); area.remove(); if (!ok) throw Error(t('无法自动复制，请手动选择文本。', 'Select and copy the text manually.')); } }
       $('copy-preview').onclick = async () => { try { if (!preview) return; await copy(preview.displayPrompt); toast(t('已复制。', 'Copied.')); } catch (error) { report(error); } };
-      $('export-open').onclick = () => dialog(t('导出方案', 'Export presets'), t('导出已保存的预设；请先保存需要导出的修改。', 'Exports saved presets. Save pending edits first.'), `<label class="field">${t('范围', 'Scope')}<select id="export-scope"><option value="current">${t('仅当前预设', 'Current preset')}</option><option value="all">${t('全部预设', 'All presets')}</option></select></label><label class="field">${t('格式', 'Format')}<select id="export-format"><option value="json">JSON</option><option value="yaml">YAML</option></select></label>${dialogError}`, async () => { const format = $('export-format').value, all = $('export-scope').value === 'all', result = await request('export', { id: base.id, all, format }), url = URL.createObjectURL(new Blob([result.text], { type: format === 'json' ? 'application/json' : 'application/yaml' })), link = document.createElement('a'); link.href = url; link.download = (all ? 'preset-workshop-all' : base.id) + '.' + format; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }, t('下载', 'Download'));
+      $('export-open').onclick = () => {
+        const selected = new Set(), all = state.presets.length > 0 && state.presets.every(preset => selected.has(preset.id));
+        const boxes = state.presets.map(preset => `<label class="export-choice"><input type="checkbox" data-export-id="${esc(preset.id)}"><span class="box-check"></span><span>${esc(preset.name)}</span></label>`).join('');
+        dialog(t('导出方案', 'Export presets'), t('默认不选择任何预设；可勾选一个或多个。', 'Nothing is selected by default; choose one or more presets.'), `<div class="export-select-head"><span>${t('范围', 'Scope')}</span><button type="button" class="text-button" id="export-toggle-all">${t('全选', 'Select all')}</button></div><div class="export-choices">${boxes}</div><fieldset class="field export-format" id="export-format"><legend>${t('格式', 'Format')}</legend><div class="export-format-options"><label class="export-format-option"><input type="radio" name="export-format" value="json" checked><span>JSON</span></label><label class="export-format-option"><input type="radio" name="export-format" value="yaml"><span>YAML</span></label></div></fieldset>${dialogError}`, async () => { const ids = [...root.querySelectorAll('[data-export-id]:checked')].map(input => input.dataset.exportId); if (!ids.length) throw Error(t('请至少选择一个预设。', 'Select at least one preset.')); const format = root.querySelector('[name="export-format"]:checked').value, result = await request('export', { ids, format }), url = URL.createObjectURL(new Blob([result.text], { type: format === 'json' ? 'application/json' : 'application/yaml' })), link = document.createElement('a'); link.href = url; link.download = `preset-workshop-${ids.length === state.presets.length ? 'all' : ids.length}.` + format; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }, t('下载', 'Download'));
+        const toggle = () => { const inputs = [...root.querySelectorAll('[data-export-id]')], checked = inputs.filter(input => input.checked).length; $('export-toggle-all').textContent = checked === inputs.length ? t('全不选', 'Clear all') : t('全选', 'Select all'); };
+        $('export-toggle-all').onclick = () => { const inputs = [...root.querySelectorAll('[data-export-id]')], check = inputs.some(input => !input.checked); inputs.forEach(input => { input.checked = check; }); toggle(); };
+        root.querySelectorAll('[data-export-id]').forEach(input => input.onchange = toggle);
+      };
       async function importFile(payload) {
         state = await request('import', payload); render(); await refreshPreview(true);
       }
@@ -399,20 +615,36 @@ window.__ModuleLoader__.load({
           finally { dialogPending = false; $('import-overwrite').disabled = false; }
         };
       }
-      $('import-open').onclick = () => {
-        let payload;
+      const openImport = () => {
+        let payload, readVersion = 0;
         dialog(t('导入方案', 'Import presets'), t('选择 Preset Workshop 的 JSON / YAML 导出文件。', 'Choose a Preset Workshop JSON / YAML export file.'), `<label class="field">${t('选择文件', 'Choose file')}<input id="import-file" type="file" accept=".json,.yaml,.yml" required></label>${dialogError}`, async () => {
           if (!payload) throw Error(t('请先选择文件。', 'Choose a file first.'));
           try { await importFile(payload); }
           catch (error) { if (error.code !== 'import-conflict') throw error; dialogPending = false; closeDialog(); setTimeout(() => importConflict(payload, error.details.conflicts), 0); }
         }, t('导入', 'Import'));
-        $('import-file').onchange = async event => { try { payload = undefined; const file = event.target.files[0]; if (!file) return; if (file.size > 2 * 1024 * 1024) throw Error(t('文件不能超过 2 MiB。', 'File exceeds 2 MiB.')); payload = { mode: 'new', format: /\.ya?ml$/i.test(file.name) ? 'yaml' : 'json', text: await file.text() }; $('dialog-error').textContent = ''; } catch (error) { $('dialog-error').textContent = error.message; } };
+        $('import-file').onchange = async event => {
+          const version = ++readVersion;
+          try {
+            payload = undefined;
+            const file = event.target.files[0];
+            if (!file) return;
+            if (file.size > 8 * 1024 * 1024) throw Error(t('文件不能超过 8 MiB。', 'File exceeds 8 MiB.'));
+            const text = await file.text();
+            if (version !== readVersion) return;
+            payload = { mode: 'new', format: /\.ya?ml$/i.test(file.name) ? 'yaml' : 'json', text };
+            $('dialog-error').textContent = '';
+          } catch (error) { if (version === readVersion) $('dialog-error').textContent = error.message; }
+        };
+      };
+      $('import-open').onclick = () => {
+        if (!dirty()) return openImport();
+        dialog(t('导入方案', 'Import presets'), t('当前有未保存修改。', 'There are unsaved changes.'), `<p>${t('继续导入会丢弃当前未保存编辑。', 'Continuing will discard the current unsaved edits.')}</p>`, () => { setTimeout(openImport, 0); }, t('丢弃并继续', 'Discard and continue'));
       };
       localize();
       render(); await refreshPreview(true);
       const offLocale = ctx.locale.subscribe(() => { english = ctx.locale.getSnapshot().active?.startsWith('en') ?? false; localize(); render(false); renderPreview(); });
       // Host owns automatic scanning. Poll only its snapshot, never duplicate scans.
-      timer = setInterval(async () => { if (busy || dialogPending || signal.aborted) return; try { const snapshot = await request('snapshot'); const changedAt = snapshot.catalog.scannedAt !== state.catalog.scannedAt || snapshot.catalog.revision !== state.catalog.revision || snapshot.sourcesVersion !== state.sourcesVersion || snapshot.proxyInjection !== state.proxyInjection || (sessionId && snapshot.sessions.find(session => session.id === sessionId)?.contextVersion !== state.sessions.find(session => session.id === sessionId)?.contextVersion); state = snapshot; renderContextOptions(); if (changedAt) { tools(); scanStatus(); await refreshPreview(true); } } catch (error) { report(error); } }, 5000);
+      timer = setInterval(async () => { if (busy || dialogPending || signal.aborted) return; try { const snapshot = await request('snapshot'); const changedAt = snapshot.catalog.scannedAt !== state.catalog.scannedAt || snapshot.catalog.revision !== state.catalog.revision || snapshot.sourcesVersion !== state.sourcesVersion || (sessionId && snapshot.sessions.find(session => session.id === sessionId)?.contextVersion !== state.sessions.find(session => session.id === sessionId)?.contextVersion); state = snapshot; renderContextOptions(); if (changedAt) { tools(); scanStatus(); await refreshPreview(true); } } catch (error) { report(error); } }, 5000);
       return () => { offLocale(); clearInterval(timer); clearTimeout(previewTimer); clearTimeout(toastTimer); scrollTimers.forEach(clearTimeout); root.removeEventListener('scroll', onScroll, true); $('editor-dialog').close(); };
     }
     function installNavIcon(ctx, label) {

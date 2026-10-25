@@ -11,6 +11,9 @@ export const PERSONA_SECTIONS = new Set(['harness:identity', 'deployment:persona
 export const AGENT_SECTION = 'workshop:agent-instructions';
 export const DIRECTORY_AGENT = 'workshop:directory-instructions';
 export const TOOL_GUIDANCE = 'workshop:tool-guidance';
+export const TIME_CONTEXT = 'time-context';
+export const MCP_CLIENT_MODULE = '@deepseek-ai/dsh-mcp-client';
+export const isLegacyCwdSection = section => section.name === 'deployment:persona-suffix' && /^\s*Your working directory is\s+\{\{\s*cwd\s*\}\}\.?\s*$/.test(section.text);
 // An explicit per-preset binding overrides a source manager's invocation switch,
 // without changing that manager or the original skill file.
 export const boundSkill = skill => ({ ...skill, invocation: { modelInvocable: true, userInvocable: true } });
@@ -24,6 +27,8 @@ export function newPreset(id, name = id, builtin = false, shell = 'bash') {
     prompt: { persona: 'You are a helpful assistant.', sections: {} },
     tools: { enabled: [shell, ...Object.keys(BUILTINS).filter(name => !['bash', 'pwsh'].includes(name))], packages: [], overrides: {} },
     skills: [],
+    mcp: [],
+    mcpEnabled: {},
   };
 }
 export function validatePreset(input, previous, all = [], roster = [], catalog = []) {
@@ -43,7 +48,7 @@ export function validatePreset(input, previous, all = [], roster = [], catalog =
   record(p.prompt.sections, 'prompt.sections');
   for (const [name, section] of Object.entries(p.prompt.sections)) {
     if (PERSONA_SECTIONS.has(name) || name === 'preset-workshop:persona' || name === DIRECTORY_AGENT) fail('managed-section', `prompt.sections.${name}: managed by persona or native directory instructions`);
-    if (section?.custom && (name.startsWith('tool:') || [AGENT_SECTION, TOOL_GUIDANCE].includes(name))) fail('managed-section', `prompt.sections.${name}: cannot be a custom section`);
+    if (section?.custom && (name.startsWith('tool:') || [AGENT_SECTION, TOOL_GUIDANCE, TIME_CONTEXT].includes(name))) fail('managed-section', `prompt.sections.${name}: cannot be a custom section`);
     if (!name.trim() || name !== name.trim() || name.length > 256 || /[\x00-\x1f\x7f]/.test(name) || !section || typeof section.text !== 'string' || section.text.length > 200000 || !Number.isFinite(section.order) || typeof section.enabled !== 'boolean' || (section.custom !== undefined && typeof section.custom !== 'boolean')) fail('invalid-section', `prompt.sections.${name}: expected a name, text (max 200000 characters), finite order and enabled`);
   }
   if (!p.tools) fail('invalid-tools', 'tools: required');
@@ -59,14 +64,52 @@ export function validatePreset(input, previous, all = [], roster = [], catalog =
     if (override.schema) validateToolJSON(override.schema, name, catalog.find(x => x.name === name)?.schema);
   }
   stringList(p.skills, 'skills');
+  p.mcpEnabled ??= {};
+  record(p.mcpEnabled, 'mcpEnabled');
+  for (const [name, enabled] of Object.entries(p.mcpEnabled)) if (!/^[A-Za-z0-9_-]{1,32}$/.test(name) || typeof enabled !== 'boolean') fail('invalid-mcp', `mcpEnabled.${name}: expected a valid server name and boolean`);
+  p.mcp ??= [];
+  if (!Array.isArray(p.mcp) || p.mcp.some(server => !server || typeof server !== 'object' || Array.isArray(server))) fail('invalid-mcp', 'mcp: expected an array of server configurations');
+  const serverNames = new Set();
+  p.mcp = p.mcp.map((server, index) => validateMcp(server, `mcp[${index}]`, serverNames));
   p.revision = (previous?.revision ?? 0) + 1;
-  return { id: p.id, name: p.name, description: p.description, builtin: p.builtin, enabled: p.enabled, revision: p.revision, prompt: p.prompt, tools: p.tools, skills: p.skills };
+  return { id: p.id, name: p.name, description: p.description, builtin: p.builtin, enabled: p.enabled, revision: p.revision, prompt: p.prompt, tools: p.tools, skills: p.skills, mcp: p.mcp, mcpEnabled: p.mcpEnabled };
 }
 export function record(value, path) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(k => ['__proto__', 'constructor', 'prototype'].includes(k))) fail('invalid-object', `${path}: expected a plain record`);
 }
 function stringList(value, path) {
   if (!Array.isArray(value) || value.some(x => typeof x !== 'string' || !x.trim() || x !== x.trim() || x.length > 256) || new Set(value).size !== value.length) fail('invalid-list', `${path}: expected unique nonempty strings`);
+}
+export function validateMcp(value, path = 'mcp', names = new Set()) {
+  record(value, path);
+  const p = structuredClone(value);
+  if (typeof p.serverName !== 'string' || !/^[A-Za-z0-9_-]{1,32}$/.test(p.serverName)) fail('invalid-mcp', `${path}.serverName: expected 1-32 letters, digits, hyphens or underscores`);
+  if (names.has(p.serverName)) fail('duplicate-mcp', `mcp.serverName: ${p.serverName} is already used in this preset`);
+  names.add(p.serverName);
+  if (p.enabled !== undefined && typeof p.enabled !== 'boolean') fail('invalid-mcp', `${path}.enabled: expected boolean`);
+  if (!['stdio', 'streamable-http'].includes(p.transport)) fail('invalid-mcp', `${path}.transport: expected stdio or streamable-http`);
+  const expression = item => typeof item === 'string' || Boolean(item && typeof item === 'object' && typeof item.__jsExpr === 'string' && Object.keys(item).length === 1);
+  const map = (value, name) => { record(value, `${path}.${name}`); if (Object.values(value).some(item => !expression(item))) fail('invalid-mcp', `${path}.${name}: values must be strings or !!js expressions`); return value; };
+  if (p.transport === 'stdio') {
+    if (typeof p.command !== 'string' || !p.command.trim()) fail('invalid-mcp', `${path}.command: expected a command`);
+    p.args ??= [];
+    if (!Array.isArray(p.args) || p.args.some(item => typeof item !== 'string' || item.includes('\n'))) fail('invalid-mcp', `${path}.args: expected string arguments`);
+    p.env = map(p.env ?? {}, 'env');
+    p.cwd ??= '';
+    if (typeof p.cwd !== 'string') fail('invalid-mcp', `${path}.cwd: expected text`);
+  } else {
+    let url; try { url = new URL(p.url); } catch {}
+    if (!url || !['http:', 'https:'].includes(url.protocol)) fail('invalid-mcp', `${path}.url: expected an http(s) URL`);
+    p.headers = map(p.headers ?? {}, 'headers');
+  }
+  for (const key of ['toolCallTimeoutMs', 'maxInstructionBytes']) if (p[key] !== undefined && (!Number.isFinite(p[key]) || p[key] < 1)) fail('invalid-mcp', `${path}.${key}: expected a positive number`);
+  if (p.failOnStartupError !== undefined && typeof p.failOnStartupError !== 'boolean') fail('invalid-mcp', `${path}.failOnStartupError: expected boolean`);
+  if (p.reconnect !== undefined) {
+    record(p.reconnect, `${path}.reconnect`);
+    for (const key of ['enabled']) if (p.reconnect[key] !== undefined && typeof p.reconnect[key] !== 'boolean') fail('invalid-mcp', `${path}.reconnect.${key}: expected boolean`);
+    for (const key of ['initialDelayMs', 'maxDelayMs', 'maxAttempts']) if (p.reconnect[key] !== undefined && (!Number.isInteger(p.reconnect[key]) || p.reconnect[key] < 1)) fail('invalid-mcp', `${path}.reconnect.${key}: expected a positive integer`);
+  }
+  return p;
 }
 export function validateToolJSON(value, name, original) {
   if (value?.type !== 'function') fail('invalid-schema', 'type: expected "function"');
@@ -113,9 +156,25 @@ export function selectedBinding(header, events) {
   for (const event of events) if (event.type === 'agent-preset/selected') id = event.data.agentPreset;
   return id;
 }
+export function filterMcpSections(sections, preset) {
+  const disabledMcp = new Set([
+    ...Object.entries(preset.mcpEnabled ?? {}).filter(([, value]) => value === false).map(([name]) => name),
+    ...(preset.mcp ?? []).filter(server => server.enabled === false).map(server => server.serverName),
+  ]);
+  return sections.flatMap(section => {
+    if (section.name.startsWith('mcp:') && (disabledMcp.has(section.name.slice(4)) || !section.text?.trim())) return [];
+    if (section.name !== 'mcp-resource-servers') return [section];
+    const start = section.text.lastIndexOf('['), end = section.text.lastIndexOf(']');
+    let servers;
+    try { servers = JSON.parse(section.text.slice(start, end + 1)); } catch { return []; }
+    if (!Array.isArray(servers) || servers.some(name => typeof name !== 'string')) return [];
+    const visible = servers.filter(name => !disabledMcp.has(name));
+    return visible.length ? [{ ...section, text: section.text.slice(0, start) + JSON.stringify(visible) + section.text.slice(end + 1) }] : [];
+  });
+}
 export function transformPrompt(assembly, preset, catalog, definitions = new Map()) {
   const enabled = new Set(preset.tools.enabled);
-  // The cwd suffix is a normal, editable supplemental section.
+  const movedCwd = assembly.contexts?.some(context => context.name === 'working-directory:current');
   const sections = assembly.sections.filter(x => !PERSONA_SECTIONS.has(x.name) && x.name !== AGENT_SECTION);
   const activeSections = new Set();
   const knownSections = new Set();
@@ -132,6 +191,8 @@ export function transformPrompt(assembly, preset, catalog, definitions = new Map
   const result = [{ name: 'preset-workshop:persona', text: preset.prompt.persona, order: -1000 }];
   for (const [index, section] of sections.entries()) {
     const toolName = section.name.startsWith('tool:') ? section.name.slice(5) : undefined;
+    const edit = preset.prompt.sections[section.name];
+    if (!section.text?.trim() && !toolName && !(section.name === 'deployment:persona-suffix' && edit?.text.trim())) continue;
     if (knownSections.has(section.name) && !activeSections.has(section.name)) continue;
     if (toolName && !knownSections.has(section.name) && !enabled.has(toolName)) continue;
     const candidates = catalog.filter(tool => enabled.has(tool.name) && (tool.sections ?? []).includes(section.name));
@@ -142,12 +203,12 @@ export function transformPrompt(assembly, preset, catalog, definitions = new Map
       const override = preset.tools.overrides[tool.name];
       return !override || (override.promptEnabled !== false && override.prompt === undefined);
     })) continue;
-    const edit = preset.prompt.sections[section.name];
     if (edit?.enabled === false) continue;
+    if (movedCwd && isLegacyCwdSection({ ...section, text: edit?.text ?? section.text })) continue;
     result.push({ ...section, text: edit?.text ?? toolOverride?.prompt ?? section.text, order: edit?.order ?? definitions.get(section.name)?.order ?? (index + 1) * 100 });
   }
   for (const [name, section] of Object.entries(preset.prompt.sections)) {
-    if (![AGENT_SECTION, DIRECTORY_AGENT, TOOL_GUIDANCE].includes(name) && !knownSections.has(name) && !name.startsWith('tool:') && section.enabled && !sections.some(x => x.name === name)) result.push({ name, text: section.text, order: section.order });
+    if (section.custom && ![AGENT_SECTION, DIRECTORY_AGENT, TOOL_GUIDANCE, TIME_CONTEXT].includes(name) && !knownSections.has(name) && !name.startsWith('tool:') && section.enabled && !sections.some(x => x.name === name)) result.push({ name, text: section.text, order: section.order });
   }
   for (const tool of tools) {
     const override = preset.tools.overrides[tool.name];
@@ -169,5 +230,6 @@ export function transformPrompt(assembly, preset, catalog, definitions = new Map
     }
   }
   result.sort((a, b) => a.name === 'preset-workshop:persona' ? -1 : b.name === 'preset-workshop:persona' ? 1 : a.order - b.order);
-  return { ...assembly, sections: result.map(({ order, ...section }) => section), tools };
+  const visibleSections = filterMcpSections(result.map(({ order, ...section }) => section), preset);
+  return { ...assembly, sections: visibleSections, tools };
 }

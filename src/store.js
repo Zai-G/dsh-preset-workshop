@@ -57,6 +57,7 @@ export class WorkshopStore {
       if (!meta || !prompt || !tools) fail('incomplete-config', `Incomplete preset: ${id}`);
       if (meta.id !== id) fail('invalid-id', `Stored preset identity differs from its directory: ${id}`);
       const p = { ...meta, prompt, tools };
+      p.mcp ??= [];
       validatePreset(p, p, presets);
       presets.push(p);
     }

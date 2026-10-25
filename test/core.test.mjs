@@ -15,6 +15,46 @@ test('preset ids, names and builtin identity stay safe across imports', () => {
   assert.throws(() => validatePreset(newPreset('two', 'A'), undefined, [p]));
   assert.equal(validatePreset({ ...p, builtin: false, enabled: false }, p).enabled, true);
 });
+test('MCP server configurations validate transport fields and stay isolated by name', () => {
+  const p = newPreset('mcp');
+  p.mcp = [
+    { serverName: 'docs', transport: 'stdio', command: 'node', args: ['server.js'], cwd: '', env: { TOKEN: { __jsExpr: 'process.env.TOKEN' } } },
+    { serverName: 'remote', transport: 'streamable-http', url: 'https://example.test/mcp', headers: { Authorization: 'Bearer token' } },
+  ];
+  const validated = validatePreset(p, p);
+  assert.deepEqual(validated.mcp, p.mcp);
+  assert.throws(() => validatePreset({ ...p, mcp: [...p.mcp, { ...p.mcp[0] }] }, p), error => error.code === 'duplicate-mcp');
+  assert.throws(() => validatePreset({ ...p, mcp: [{ serverName: 'remote', transport: 'streamable-http', url: 'file:///tmp/mcp' }] }, p), error => error.code === 'invalid-mcp');
+  assert.throws(() => validatePreset({ ...p, mcp: [{ serverName: 'docs', transport: 'stdio', command: 'node', args: [], env: { TOKEN: { __jsExpr: 'process.env.TOKEN', extra: true } } }] }, p), error => error.code === 'invalid-mcp');
+  assert.throws(() => validatePreset({ ...p, mcpEnabled: { docs: 'false' } }, p), error => error.code === 'invalid-mcp');
+  assert.throws(() => validatePreset({ ...p, mcp: [{ ...p.mcp[0], enabled: 'false' }] }, p), error => error.code === 'invalid-mcp');
+});
+test('disabled MCP services leave neither instructions nor resource names after prompt edits', () => {
+  const p = newPreset('mcp-filter');
+  p.mcpEnabled = { environment: false };
+  p.mcp = [{ serverName: 'custom', enabled: false }];
+  const resource = { name: 'mcp-resource-servers', text: 'Servers: ["environment","custom","keep"]', order: 3100, enabled: true };
+  p.prompt.sections[resource.name] = resource;
+  const assembly = { sections: [resource, { name: 'mcp:environment', text: 'ENV' }, { name: 'mcp:custom', text: 'CUSTOM' }, { name: 'mcp:keep', text: 'KEEP' }, { name: 'mcp:empty', text: '' }], tools: [] };
+  let sections = transformPrompt(assembly, p, []).sections;
+  assert.equal(sections.find(s => s.name === resource.name).text, 'Servers: ["keep"]');
+  assert.deepEqual(sections.filter(s => s.name.startsWith('mcp:')).map(s => s.name), ['mcp:keep']);
+  p.mcpEnabled.keep = false;
+  assert.ok(!transformPrompt(assembly, p, []).sections.some(s => s.name === resource.name));
+  p.prompt.sections[resource.name].text = 'An edited list without JSON';
+  assert.ok(!transformPrompt(assembly, p, []).sections.some(s => s.name === resource.name));
+});
+test('empty and unavailable native sections stay out while saved custom text survives', () => {
+  const p = newPreset('empty-sections');
+  p.prompt.sections = {
+    'missing:plugin': { text: 'Saved while the plugin was present', order: 100, enabled: true },
+    'custom:note': { text: 'Keep this custom note', order: 110, enabled: true, custom: true },
+    'time-context': { text: 'Must not become System', order: 0, enabled: true },
+  };
+  const sections = transformPrompt({ sections: [{ name: 'deployment:persona-suffix', text: ' ' }, { name: 'mcp-resource-servers', text: 'Servers: []' }], tools: [] }, p, []).sections;
+  assert.deepEqual(sections.map(section => section.name), ['preset-workshop:persona', 'custom:note']);
+  assert.equal(p.prompt.sections['missing:plugin'].text, 'Saved while the plugin was present');
+});
 test('tool JSON only changes descriptions, including a parameter named description', () => {
   const copy = structuredClone(tool);
   copy.function.parameters.properties.path.description = 'new';
