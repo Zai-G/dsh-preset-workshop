@@ -7,26 +7,28 @@ window.__ModuleLoader__.load({
     const BUILTINS = ['bash', 'read', 'edit', 'write', 'web_search', 'web_fetch', 'ask_user_question', 'todo_write'];
     const AGENT = 'workshop:agent-instructions';
     const DIRECTORY_AGENT = 'workshop:directory-instructions';
+    const USER_DIRECTORY = 'workshop:user-directory';
     const names = { ask_user_question: 'ask', todo_write: 'todo' };
     const toolIcons = { bash: 'terminal', pwsh: 'terminal', read: 'file', edit: 'edit', write: 'file-plus', web_search: 'globe', web_fetch: 'globe', ask_user_question: 'chat', subagent: 'agent', todo_write: 'jobs', glob: 'search', grep: 'search', skill: 'skill', present: 'present', job_list: 'jobs', job_output: 'jobs', job_kill: 'jobs', subagent_fork: 'agent', list_mcp_resources: 'cloud', list_mcp_resource_templates: 'cloud', read_mcp_resource: 'cloud' };
     const clone = value => structuredClone(value);
     const equal = (a, b) => a === b || Boolean(a && b && typeof a === 'object' && typeof b === 'object' && Array.isArray(a) === Array.isArray(b) && Object.keys(a).length === Object.keys(b).length && Object.keys(a).every(key => Object.hasOwn(b, key) && equal(a[key], b[key])));
     const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const staticCopy = {
-      '预设工坊': 'Preset Workshop', '让每一个 Agent 都有自己的工作方式。': 'Give every Agent its own way of working.',
-      '导入': 'Import', '导出': 'Export', '预设方案': 'Presets', '已保存': 'Saved', '预设 ID': 'Preset ID',
+      '预设工坊': 'Preset Workshop', '让您的每一个 Agent 都有自己的工作方式。': 'Give each of your Agents its own way of working.',
+      '导入': 'Import', '导出': 'Export', '预设方案': 'Presets', '已保存': 'Saved', '预设 ID': 'Preset ID', '提示词': 'Prompts',
       '新建': 'New', '重命名': 'Rename', '启用': 'Enabled', '删除': 'Delete', '描述': 'Description',
       '回退目标': 'Fallback preset', '恢复默认': 'Reset', '保存方案': 'Save preset', '系统提示词': 'System prompt',
       '扫描': 'Scan', '自动扫描': 'Auto scan', '上次扫描：': 'Last scan: ', '尚未扫描': 'Not scanned yet',
       '每': 'Every', '秒': 'seconds', '人设': 'Persona', '变量': 'Variables', '只读 · 实际值': 'Read only · Actual values',
-      '拼接': 'Supplemental instructions', '取消': 'Cancel', '保存': 'Save', '工具': 'Tools', '内置': 'Built in',
+      '拼接': 'Supplemental instructions', '宿主': 'Host', '宿主说明': 'About the host', '取消': 'Cancel', '保存': 'Save', '工具': 'Tools', '内置': 'Built in',
       '可选': 'Optional', '官方': 'Official', '第三方': 'Third party', '工具说明随开关同步更新': 'Tool instructions follow tool visibility',
-      '技能绑定': 'Skills', '未绑定技能': 'No skills selected', '检测到的技能': 'Discovered skills', '全开': 'Select all', '全不开': 'Clear all', 'MCP服务': 'MCP services', '未发现 MCP 服务': 'No MCP services detected', '新建 MCP 服务器': 'New MCP server', '添加 MCP': 'Add MCP',
+      '技能绑定': 'Skills', '技能': 'Skills', '未绑定技能': 'No skills selected', '未选择技能': 'No skills selected', '检测到的技能': 'Discovered skills', '全开': 'Select all', '全不开': 'Clear all', 'MCP服务': 'MCP services', '未发现 MCP 服务': 'No MCP services detected', '新建 MCP 服务器': 'New MCP server', '添加 MCP': 'Add MCP',
       '绑定技能时同步开启 skill 工具；若未开启 skill 工具，User段SKILL不会进入上下文，可能会出现AI不自主选择技能使用；手动给出技能路径不受影响': 'Selecting skills also enables the skill tool. If it is off, the User SKILL catalog is omitted and AI may not select skills on its own. Providing a skill path manually still works.',
-      '拼接说明': 'About assembled context',
+      '绑定技能时同步开启 skill 工具': 'Selecting skills also enables the skill tool', '若未开启 skill 工具，User 段 SKILL 不会进入上下文，会出现 AI 不主动选择技能': 'Without the skill tool, the User SKILL catalog is omitted and AI may not select skills on its own', '手动给出技能路径不受影响': 'Providing a skill path manually still works.',
       '部分插件注入的提示词未向 DSH 暴露读取或覆盖接口，此层不包含在工坊预览中。但实际仍会进入上下文': 'Some plugins inject prompts without a DSH read or override interface. Those prompts are outside this preview but still enter the context.',
       '预览': 'Preview', '展开预览': 'Expand preview', '预览环境': 'Preview context', '工作目录': 'Working directory',
-      '工具与技能': 'Tools and skills', '最终提示词': 'Final prompt', '复制提示词': 'Copy prompt',
+      '工具与技能': 'Tools and skills', '最终提示词': 'Final prompt', '复制提示词': 'Copy prompt', '兼容': 'Compatibility', '兼容内容': 'Compatibility content', '已安装': 'Installed', '发现': 'Discovered', '外部 Agent 预设': 'External Agent presets', '计划中': 'Planned',
+      '当前预设的实际组成与请求上下文估算': 'Preset composition and request context estimate', '预留兼容入口。后续制定统一标准与暴露接口，让 Claude Code、Codex 等 Agent 预设可在 DSH 中独立展示和使用。': 'Reserved for external presets. A shared format and API are needed before Claude Code, Codex and other Agent presets can be listed and used independently in DSH.', '尚未发现外部 Agent 预设。': 'No external Agent presets found.',
       '工具仅展示顶层描述；工作目录等环境、AGENTS 和技能目录通过 User 消息注入。预览不含实际对话历史；token 为字符数估算。': 'Tools show top-level descriptions. Environment (including working directory), AGENTS and skills enter as User messages. Conversation history is omitted; tokens are character-based estimates.',
       '请确保您了解 AI 与提示词的机制，否则请不要修改系统提示词与工具描述；您的任何修改导致的后果由您个人承担。': 'Only edit system prompts and tool descriptions if you understand their effect on AI behavior. You are responsible for the consequences of your changes.',
       '停用或删除预设时，引用它的会话将回退到此预设。会话的消息历史不会改变。': 'Sessions referencing a disabled or deleted preset fall back to this preset. Message history is preserved.',
@@ -47,6 +49,8 @@ window.__ModuleLoader__.load({
     async function mount(root, ctx, signal) {
       let english = ctx.locale.getSnapshot().active?.startsWith('en') ?? false;
       const t = (zh, en) => english ? en : zh;
+      const globalAgentDescription = () => t('官方全局 AGENTS.md · 仅覆盖当前预设，保留项目与子目录指令，不修改原文件。', 'Official global AGENTS.md · Overrides only this preset; project and subdirectory instructions remain active, and the source file is unchanged.');
+      const directoryAgentDescription = () => t('项目级 AGENTS.md，请在对应目录进行修改', 'Project AGENTS.md; edit it in the corresponding directory.');
       const textResponse = async file => {
         const response = await fetch('/preset-workshop/' + file, { signal });
         if (!response.ok) throw Error(t('界面资源加载失败。', 'Unable to load UI resources.'));
@@ -116,8 +120,9 @@ window.__ModuleLoader__.load({
         const changed = dirty(); $('save-state').classList.toggle('dirty', changed);
         $('save-state').innerHTML = (changed ? icon('edit') : '<span class="status-dot"></span>') + t(changed ? '有未保存修改' : '已保存', changed ? 'Unsaved changes' : 'Saved');
         $('persona-count').textContent = t(`${draft.prompt.persona.length.toLocaleString()} 字符`, `${draft.prompt.persona.length.toLocaleString()} characters`);
-        $('tools-count').textContent = t(`已启用 ${preview?.tools.length ?? draft.tools.enabled.length} 个工具`, `${preview?.tools.length ?? draft.tools.enabled.length} tools enabled`);
-        $('skills-summary').textContent = draft.skills.length ? t(`已绑定 ${draft.skills.length} 个技能`, `${draft.skills.length} skills selected`) : t('未绑定技能', 'No skills selected');
+        const activeTools = preview?.tools.filter(tool => !tool.function.name.startsWith('mcp__')).length ?? draft.tools.enabled.filter(name => !name.startsWith('mcp__')).length;
+        $('tools-count').textContent = t(`已启动 ${activeTools} 个工具`, `${activeTools} tools started`);
+        $('skills-summary').textContent = draft.skills.length ? t(`已选择 ${draft.skills.length} 个技能`, `${draft.skills.length} skills selected`) : t('未选择技能', 'No skills selected');
       }
       const choice = p => `<span class="choice-name">${esc(p.name)}</span>${p.builtin ? `<span class="pill">${t('内置', 'Built in')}</span>` : !p.enabled ? `<span class="pill neutral-pill">${t('已停用', 'Disabled')}</span>` : ''}`;
       function pickers() {
@@ -130,10 +135,20 @@ window.__ModuleLoader__.load({
       function closePickers() { root.querySelectorAll('.select-card[open]').forEach(el => { el.open = false; }); }
       function scanStatus() {
         $('auto-scan').checked = state.config.polling; $('interval-field').hidden = !state.config.polling; $('scan-interval').value = state.config.scanInterval;
-        const at = state.catalog.scannedAt, count = state.catalog.tools.filter(tool => tool.available).length;
-        $('scan-result').textContent = t(`扫描发现 ${count} 个工具`, `${count} tools discovered`);
+        const at = state.catalog.scannedAt, count = state.catalog.tools.filter(tool => tool.available && tool.kind !== 'mcp').length;
+        $('tools-discovered-count').textContent = t(`发现 ${count} 个工具`, `${count} tools discovered`);
         $('scan-time').textContent = at ? new Date(at).toLocaleString(english ? 'en-US' : 'zh-CN', { hour12: false }) : t('尚未扫描', 'Not scanned yet');
         $('scan-time').dateTime = at || '';
+        $('scan-summary').textContent = scanSentence();
+      }
+      function scanCounts() {
+        const counts = state.catalog.counts || {};
+        return { promptSections: counts.promptSections ?? 0, tools: counts.tools ?? state.catalog.tools.filter(tool => tool.available && tool.kind !== 'mcp').length, mcpServers: counts.mcpServers ?? 0, mcpTools: counts.mcpTools ?? 0, skills: counts.skills ?? 0, presets: 0, complete: counts.complete !== false };
+      }
+      function scanSentence(skipEmpty = false) {
+        const counts = scanCounts();
+        const items = [['promptSections', `${counts.promptSections} ${t('个提示词段', 'prompt sections')}`], ['tools', `${counts.tools} ${t('个工具', 'tools')}`], ['mcpServers', `${counts.mcpServers} 个MCP（${counts.mcpTools} 个工具）`], ['skills', `${counts.skills} ${t('个技能', 'skills')}`], ['presets', `${counts.presets} ${t('个预设', 'presets')}`]].filter(([key]) => !skipEmpty || counts[key] > 0).map(([, value]) => value);
+        return t('扫描完成：', 'Scan complete: ') + (items.length ? items.join(t('、', ', ')) : t('未发现可用内容', 'nothing detected')) + (counts.complete ? t('。', '.') : t('（技能扫描未完整）。', ' (skill discovery incomplete).'));
       }
       function toolEnabled(tool) { return tool.light === false ? draft.tools.packages.includes(tool.package) : draft.tools.enabled.includes(tool.name); }
       function toolCard(tool) {
@@ -142,19 +157,36 @@ window.__ModuleLoader__.load({
         return `<div class="tool-card${toolEnabled(tool) ? '' : ' off'}">${icon(toolIcon)}<div class="tool-info"><div class="tool-name" title="${esc(tool.name)}">${esc(names[tool.name] || tool.name)}</div>${tool.schema ? `<button class="text-button" data-description="${esc(tool.name)}">${t('工具描述', 'Description')} ${icon('chevron')}</button>` : ''}${unavailable ? `<span class="unavailable">${t('不可用', 'Unavailable')}</span>` : ''}</div><label class="switch"><input type="checkbox" data-tool="${esc(tool.name)}" aria-label="${esc(t('启用 ', 'Enable ') + tool.name)}" ${toolEnabled(tool) ? 'checked' : ''} ${tool.serverDisabled || !tool.available && !tool.unavailable ? 'disabled' : ''}><span class="track"></span></label></div>`;
       }
       const toolSource = name => preview?.catalog.find(tool => tool.name === name) || state.catalog.tools.find(tool => tool.name === name);
-      function tools() {
-        const all = state.catalog.tools.map(tool => toolSource(tool.name)).filter(Boolean), builtinNames = [all.some(tool => tool.name === 'pwsh' && tool.available) && !all.some(tool => tool.name === 'bash' && tool.available) ? 'pwsh' : 'bash', ...BUILTINS.slice(1)], visible = all.filter(tool => tool.kind !== 'mcp'), official = visible.filter(tool => !builtinNames.includes(tool.name) && tool.kind !== 'thirdparty'), third = visible.filter(tool => !builtinNames.includes(tool.name) && tool.kind === 'thirdparty');
-        $('builtin-tools').innerHTML = builtinNames.map(name => all.find(tool => tool.name === name)).filter(Boolean).map(toolCard).join('');
-        $('official-tools').innerHTML = official.map(toolCard).join('');
-        $('thirdparty-tools').className = third.length ? 'tools-grid bounded-list' : 'bounded-list';
-        $('thirdparty-tools').innerHTML = third.length ? third.map(toolCard).join('') : `<div class="empty-state">${icon('box')}<span>${t('未发现第三方工具', 'No third-party tools detected')}</span></div>`;
-        // Undiscovered heavy tools are selected by package, without guessing their tool names.
-        for (const pkg of state.catalog.packages.filter(pkg => !pkg.light && !all.some(tool => tool.package === pkg.name))) {
-          $('official-tools').insertAdjacentHTML('beforeend', `<div class="tool-card${draft.tools.packages.includes(pkg.name) ? '' : ' off'}">${icon('box')}<div class="tool-info"><div class="tool-name" title="${esc(pkg.name)}">${esc(pkg.name.replace('@deepseek-ai/dsh-tool-', ''))}</div><small class="${pkg.error ? 'unavailable' : 'muted'}">${esc(pkg.error || t('启用后检测工具', 'Discover tools on enable'))}</small></div><label class="switch"><input type="checkbox" data-package="${esc(pkg.name)}" aria-label="${esc(t('启用 ', 'Enable ') + pkg.name)}" ${draft.tools.packages.includes(pkg.name) ? 'checked' : ''} ${!pkg.available || pkg.error ? 'disabled' : ''}><span class="track"></span></label></div>`);
+      function fitToolLists() {
+        for (const id of ['official-tools', 'thirdparty-tools']) {
+          const list = $(id), cards = [...list.querySelectorAll(':scope > .tool-card')];
+          if (!list.offsetParent) continue;
+          list.classList.toggle('is-capped', cards.length > 8);
+          if (cards.length <= 8 || !cards[8].getBoundingClientRect().height) { list.style.maxHeight = 'none'; continue; }
+          const gap = parseFloat(getComputedStyle(list).rowGap) || 8;
+          const top = card => Math.round(card.getBoundingClientRect().top);
+          const rowTops = [...new Set(cards.map(top))], ninthRow = rowTops.indexOf(top(cards[8]));
+          const rowHeight = index => Math.max(...cards.filter(card => top(card) === rowTops[index]).map(card => card.getBoundingClientRect().height));
+          let maxHeight = rowHeight(ninthRow) / 2;
+          for (let index = 0; index < ninthRow; index += 1) maxHeight += rowHeight(index) + gap;
+          list.style.maxHeight = `${maxHeight}px`;
         }
       }
+      function tools() {
+        const officialScroll = $('official-tools').scrollTop, thirdScroll = $('thirdparty-tools').scrollTop;
+        const all = state.catalog.tools.map(tool => toolSource(tool.name)).filter(Boolean), builtinNames = [all.some(tool => tool.name === 'pwsh' && tool.available) && !all.some(tool => tool.name === 'bash' && tool.available) ? 'pwsh' : 'bash', ...BUILTINS.slice(1)], visible = all.filter(tool => tool.kind !== 'mcp'), official = visible.filter(tool => !builtinNames.includes(tool.name) && tool.kind !== 'thirdparty'), third = visible.filter(tool => !builtinNames.includes(tool.name) && tool.kind === 'thirdparty');
+        const builtinMarkup = builtinNames.map(name => all.find(tool => tool.name === name)).filter(Boolean).map(toolCard).join('');
+        if ($('builtin-tools').innerHTML !== builtinMarkup) $('builtin-tools').innerHTML = builtinMarkup;
+        const undiscovered = state.catalog.packages.filter(pkg => !pkg.light && !all.some(tool => tool.package === pkg.name));
+        const officialMarkup = official.map(toolCard).join('') + undiscovered.map(pkg => `<div class="tool-card${draft.tools.packages.includes(pkg.name) ? '' : ' off'}">${icon('box')}<div class="tool-info"><div class="tool-name" title="${esc(pkg.name)}">${esc(pkg.name.replace('@deepseek-ai/dsh-tool-', ''))}</div><small class="${pkg.error ? 'unavailable' : 'muted'}">${esc(pkg.error || t('启用后检测工具', 'Discover tools on enable'))}</small></div><label class="switch"><input type="checkbox" data-package="${esc(pkg.name)}" aria-label="${esc(t('启用 ', 'Enable ') + pkg.name)}" ${draft.tools.packages.includes(pkg.name) ? 'checked' : ''} ${!pkg.available || pkg.error ? 'disabled' : ''}><span class="track"></span></label></div>`).join('');
+        if ($('official-tools').innerHTML !== officialMarkup) $('official-tools').innerHTML = officialMarkup;
+        $('thirdparty-tools').className = third.length ? 'tools-grid bounded-list' : 'bounded-list';
+        const thirdMarkup = third.length ? third.map(toolCard).join('') : `<div class="empty-state">${icon('box')}<span>${t('未发现第三方工具', 'No third-party tools detected')}</span></div>`;
+        if ($('thirdparty-tools').innerHTML !== thirdMarkup) $('thirdparty-tools').innerHTML = thirdMarkup;
+        requestAnimationFrame(() => { $('official-tools').scrollTop = officialScroll; $('thirdparty-tools').scrollTop = thirdScroll; fitToolLists(); });
+      }
       function mcp() {
-        const expanded = new Set([...$('mcp-list').querySelectorAll('.mcp-server[open]')].map(server => server.dataset.serverName));
+        const list = $('mcp-list'), scrollTop = list.scrollTop, expanded = new Set([...list.querySelectorAll('.mcp-server[open]')].map(server => server.dataset.serverName)), toolScroll = new Map([...list.querySelectorAll('.mcp-server')].map(server => [server.dataset.serverName, server.querySelector('.mcp-tools')?.scrollTop ?? 0]));
         const rows = [...(preview?.mcp || [])].sort((a, b) => (a.source === 'preset') - (b.source === 'preset'));
         $('mcp-summary').textContent = rows.length ? t(`${rows.length} 个 MCP 服务`, `${rows.length} MCP services`) : t('未发现 MCP 服务', 'No MCP services detected');
         $('mcp-list').innerHTML = rows.length ? rows.map(server => {
@@ -162,23 +194,24 @@ window.__ModuleLoader__.load({
           const label = server.source === 'unknown' ? t('来源未识别', 'Unidentified source') : (server.serverName || t('未知服务', 'Unknown service'));
           const enabled = server.source === 'preset' ? (draft.mcp || []).find(item => item.serverName === server.serverName)?.enabled !== false : draft.mcpEnabled?.[server.serverName] !== false;
           const lock = selected > 0, unknown = server.source === 'unknown';
-          const connection = server.connection?.state, connectionLabel = !enabled ? t('已关闭', 'Disabled') : connection === 'connecting' ? t('连接中…', 'Connecting…') : connection === 'error' ? t('连接失败，请检查配置', 'Connection failed; check configuration') : connection === 'unsaved' ? t('保存后连接', 'Connects after saving') : `${selected}/${server.tools.length}`;
+          const connection = server.connection?.state, connectionLabel = !enabled ? t('已关闭', 'Disabled') : connection === 'connecting' ? t('连接中…', 'Connecting…') : connection === 'timeout' ? t('连接超时', 'Connection timed out') : connection === 'error' ? t('连接失败，请检查配置', 'Connection failed; check configuration') : connection === 'unsaved' ? t('保存后连接', 'Connects after saving') : `${selected}/${server.tools.length}`;
           const actions = `<div class="mcp-service-controls"><button type="button" class="text-button" data-mcp-preview="${esc(server.serverName)}">${icon('eye')}${t('预览', 'Preview')}</button>${server.source === 'preset' ? `<span class="mcp-actions"><button type="button" class="icon-button ghost" data-mcp-edit="${esc(server.serverName)}" aria-label="${esc(t('编辑 MCP 服务', 'Edit MCP service'))}" title="${esc(t('编辑', 'Edit'))}">${icon('edit')}</button><button type="button" class="icon-button ghost danger" data-mcp-delete="${esc(server.serverName)}" aria-label="${esc(t('删除 MCP 服务', 'Delete MCP service'))}" title="${esc(t('删除', 'Delete'))}">${icon('trash')}</button></span>` : ''}${!unknown ? `<label class="switch" title="${esc(lock ? t('先关闭该服务的全部工具，才能切换服务开关。', 'Disable all tools from this service before switching it.') : t('仅影响当前预设', 'Affects this preset only'))}"><input type="checkbox" data-mcp-enabled="${esc(server.serverName)}" aria-label="${esc(t('启用 MCP：', 'Enable MCP: ') + label)}" ${enabled ? 'checked' : ''} ${lock ? 'disabled' : ''}><span class="track"></span></label>` : ''}</div>`;
-          return `<details class="mcp-server" data-server-name="${esc(server.serverName)}"><summary><span>${esc(label)}</span><small class="muted">${server.source === 'preset' ? t('当前工具', 'Current tool') : unknown ? t('未识别', 'Unidentified') : t('环境', 'Environment')} · ${esc(connectionLabel)}</small><svg class="icon chevron"><use href="#i-chevron"/></svg></summary>${actions}<div class="mcp-tools">${server.tools.length ? server.tools.map(tool => { const schema = tool.function ? tool : { type: 'function', function: tool }, definition = schema.function; return toolCard({ name: definition.name, kind: 'mcp', mcpServer: server.serverName, available: enabled, serverDisabled: !enabled, unavailable: Boolean(definition.unavailable), light: true, schema: definition.unavailable ? undefined : schema }); }).join('') : `<span class="muted">${t(enabled ? '尚未发现工具，可在预览中检测。' : '开启服务后检测工具。', enabled ? 'No tools yet; detect them in Preview.' : 'Enable the service to detect tools.')}</span>`}</div></details>`;
+          return `<details class="mcp-server${enabled ? '' : ' off'}" data-server-name="${esc(server.serverName)}"><summary><span>${esc(label)}</span><small class="muted">${server.source === 'preset' ? t('当前工具', 'Current tool') : unknown ? t('未识别', 'Unidentified') : t('环境', 'Environment')} · ${esc(connectionLabel)}</small><svg class="icon chevron"><use href="#i-chevron"/></svg></summary>${actions}<div class="mcp-tools">${server.tools.length ? server.tools.map(tool => { const schema = tool.function ? tool : { type: 'function', function: tool }, definition = schema.function; return toolCard({ name: definition.name, kind: 'mcp', mcpServer: server.serverName, available: enabled, serverDisabled: !enabled, unavailable: Boolean(definition.unavailable), light: true, schema: definition.unavailable ? undefined : schema }); }).join('') : `<span class="muted">${t(enabled ? '尚未发现工具，可在预览中检测。' : '开启服务后检测工具。', enabled ? 'No tools yet; detect them in Preview.' : 'Enable the service to detect tools.')}</span>`}</div></details>`;
         }).join('') : `<div class="empty-state">${icon('cloud')}<span>${t('扫描后会显示全局 MCP；新建的 MCP 仅属于当前预设。', 'Global MCP services appear after scanning. New services belong only to this preset.')}</span></div>`;
-        for (const server of $('mcp-list').querySelectorAll('.mcp-server')) server.open = expanded.has(server.dataset.serverName);
+        for (const server of list.querySelectorAll('.mcp-server')) { server.open = expanded.has(server.dataset.serverName); server.querySelector('.mcp-tools').scrollTop = toolScroll.get(server.dataset.serverName) ?? 0; }
+        list.scrollTop = scrollTop;
       }
       function skills() {
         const all = [...sourceSkills];
         for (const name of draft.skills) if (!all.some(skill => skill.name === name)) all.push({ name, description: t('未在当前目录发现；保存的绑定仍保留。', 'Not found in this directory; the saved selection is preserved.') });
-        $('skill-list').innerHTML = all.length ? all.map(skill => `<div class="skill-row">${icon('skill')}<div class="skill-copy"><p>${esc(skill.name)}</p><small class="skill-description" title="${esc(skill.description)}">${esc(skill.description)}</small><button type="button" class="text-button" data-skill-detail="${esc(skill.name)}">${t('查看详细', 'View details')} ${icon('chevron')}</button></div><label class="switch"><input type="checkbox" data-skill="${esc(skill.name)}" aria-label="${esc(t('绑定 ', 'Select ') + skill.name)}" ${draft.skills.includes(skill.name) ? 'checked' : ''}><span class="track"></span></label></div>`).join('') : `<div class="empty-state">${icon('skill')}<span>${t('未发现技能', 'No skills detected')}</span></div>`;
+        $('skill-list').innerHTML = all.length ? all.map(skill => `<div class="skill-row${draft.skills.includes(skill.name) ? '' : ' off'}">${icon('skill')}<div class="skill-copy"><p>${esc(skill.name)}</p><small class="skill-description" title="${esc(skill.description)}">${esc(skill.description)}</small><button type="button" class="text-button" data-skill-detail="${esc(skill.name)}">${t('查看详细', 'View details')} ${icon('chevron')}</button></div><label class="switch"><input type="checkbox" data-skill="${esc(skill.name)}" aria-label="${esc(t('绑定 ', 'Select ') + skill.name)}" ${draft.skills.includes(skill.name) ? 'checked' : ''}><span class="track"></span></label></div>`).join('') : `<div class="empty-state">${icon('skill')}<span>${t('未发现技能', 'No skills detected')}</span></div>`;
         if (preview?.skillWarnings?.length) $('skill-list').insertAdjacentHTML('beforeend', `<p class="unavailable">${esc(t('以下绑定尚未进入 AI 上下文，请检查来源后重试：', 'These selected skills could not enter the AI context; check their sources and retry: ') + preview.skillWarnings.join('、'))}</p>`);
         if (!completeSkills) $('skill-list').insertAdjacentHTML('beforeend', `<p class="unavailable">${t('技能目录扫描尚未完整，现有选择已保留。', 'Skill discovery is incomplete. Existing selections are preserved.')}</p>`);
         const allSelected = all.length > 0 && all.every(skill => draft.skills.includes(skill.name));
-        $('skills-all').textContent = t(allSelected ? '全不开' : '全开', allSelected ? 'Clear all' : 'Select all');
+        $('skills-all').textContent = t(allSelected ? '全不选' : '全选', allSelected ? 'Deselect all' : 'Select all');
       }
       function supplemental() {
-        const actual = (preview?.editableSections || []).filter(section => section.managedBy !== 'tools' && (!section.name.startsWith('mcp:') || section.text?.trim()));
+        const actual = (preview?.editableSections || []).filter(section => section.role !== 'user' && section.managedBy !== 'tools' && (!section.name.startsWith('mcp:') || section.text?.trim()));
         const items = actual.filter(section => !section.custom || draft.prompt.sections[section.name]).map(section => {
           const edit = draft.prompt.sections[section.name];
           return { ...section, ...(section.managedBy === 'tool-guidance' ? edit ? { order: edit.order, enabled: edit.enabled } : {} : edit || {}), ...(section.name === 'mcp-resource-servers' ? { text: section.text } : {}) };
@@ -186,30 +219,60 @@ window.__ModuleLoader__.load({
         for (const [name, section] of Object.entries(draft.prompt.sections)) if (section.custom && !items.some(item => item.name === name)) items.push({ name, ...section });
         return items.sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
       }
+      const labels = { 'context:file-reference': t('文件引用', 'File references'), 'mcp-resource-servers': t('MCP资源服务器', 'MCP resource servers'), 'ui:deliverable-file-references': t('交付文件引用', 'Deliverable file references'), 'harness:source': t('宿主来源', 'Host source'), 'app:web-surface': t('网页界面', 'Web surface'), 'deployment:persona-suffix': t('补充指令', 'Supplemental instructions'), 'workshop:user-runtime': t('环境', 'Environment'), 'workshop:user-skill': t('技能目录', 'Skill catalog') };
+      const sectionName = section => section.name === 'time-context' ? t('时间与时区', 'Time and time zone') : section.name === 'prompt-manager-catalog' ? t('提示词管理（会话实况）', 'Prompt manager (session context)') : section.name.startsWith('mcp:') ? t(`MCP：${section.name.slice(4)}`, `MCP: ${section.name.slice(4)}`) : section.name === 'workshop:tool-guidance' ? t('工具使用指令', 'Tool usage guidance') : labels[section.name] || section.name.replace(/\.md$/i, '');
       function sections() {
         const items = supplemental(), agent = preview?.agentInstructions;
-        const labels = { 'context:file-reference': t('文件引用', 'File references'), 'mcp-resource-servers': t('MCP资源服务器', 'MCP resource servers'), 'ui:deliverable-file-references': t('交付文件引用', 'Deliverable file references'), 'harness:source': t('宿主来源', 'Host source'), 'app:web-surface': t('网页界面', 'Web surface'), 'deployment:persona-suffix': t('补充指令', 'Supplemental instructions'), 'workshop:user-runtime': t('环境', 'Environment'), 'workshop:user-skill': t('技能目录', 'Skill catalog') };
-        const sectionName = section => section.name === 'time-context' ? t('时间与时区', 'Time and time zone') : section.name === 'prompt-manager-catalog' ? t('提示词管理（会话实况）', 'Prompt manager (session context)') : section.name.startsWith('mcp:') ? t(`MCP：${section.name.slice(4)}`, `MCP: ${section.name.slice(4)}`) : section.name === 'workshop:tool-guidance' ? t('工具使用指令', 'Tool usage guidance') : labels[section.name] || section.name.replace(/\.md$/i, '');
         const row = (section, options = {}) => {
-          const directory = section.name === DIRECTORY_AGENT, guidance = section.managedBy === 'tool-guidance', isAgent = options.agent, userOnly = options.userOnly;
-          const name = isAgent ? 'AGENTS' : directory ? 'AGENTS' : sectionName(section), editable = !userOnly && (isAgent ? agent.editable : section.editable !== false && !directory), reorderable = !userOnly && !isAgent && !directory && section.reorderable !== false;
-          const source = section.source ? t('插件：', 'Plugin: ') + section.source : isAgent ? t('全局级 · 仅当前预设', 'Global · This preset only') : directory ? t('目录级 · 宿主自动载入 · 只读', 'Directory · Host loaded · Read only') : section.custom ? t('自定义 · System 级', 'Custom · System level') : guidance ? t('随启用工具动态更新', 'Updates with enabled tools') : '';
-          return `<div class="detected-row${dragged === section.name ? ' is-dragging' : ''}" data-section-id="${esc(section.name)}" ${reorderable ? `data-drag-section="${esc(section.name)}"` : ''}><div class="detected-source">${reorderable ? `<button type="button" class="drag-handle" draggable="true" title="${t('拖动排序；方向键可上移或下移', 'Drag to reorder; arrow keys move up or down')}" aria-label="${esc(t('调整顺序：', 'Reorder: ') + name)}">${icon('grip')}</button>` : icon('file')}<div class="detected-label"><span class="detected-name">${esc(name)}</span>${source ? `<small class="source-note">${esc(source)}</small>` : ''}</div></div><div class="actions">${section.text !== undefined ? `<button type="button" class="section-action" data-section-preview="${esc(section.name)}">${icon('eye')}${t('预览', 'Preview')}</button>` : ''}${editable ? `<button type="button" class="section-action" data-section-edit="${esc(section.name)}">${icon('edit')}${t('编辑', 'Edit')}</button>` : ''}${editable || section.toggleable ? `<label class="switch"><input type="checkbox" data-section-enabled="${esc(section.name)}" aria-label="${esc(t('启用 ', 'Enable ') + name)}" ${section.enabled ? 'checked' : ''}><span class="track"></span></label>` : ''}</div></div>`;
+          const directory = options.directory || section.name === DIRECTORY_AGENT, guidance = section.managedBy === 'tool-guidance', isAgent = options.agent;
+          const name = isAgent ? t('AGENTS「全局」', 'AGENTS (Global)') : directory ? t('AGENTS「目录」', 'AGENTS (Directory)') : sectionName(section), editable = isAgent ? agent.editable : section.editable !== false && !directory, reorderable = !directory && section.reorderable !== false;
+          const source = section.custom ? t('自定义', 'Custom') : guidance ? t('随启用工具动态更新', 'Updates with enabled tools') : '';
+          return `<div class="detected-row${dragged === section.name ? ' is-dragging' : ''}${section.enabled === false ? ' off' : ''}" data-section-id="${esc(section.name)}" data-order="${section.order ?? 0}" ${section.custom ? 'data-custom="true"' : ''} ${section.role ? `data-role="${section.role}"` : ''} ${reorderable ? `data-drag-section="${esc(section.name)}"` : ''}><div class="detected-source">${reorderable ? `<button type="button" class="drag-handle" draggable="true" title="${t('拖动排序；方向键可上移或下移', 'Drag to reorder; arrow keys move up or down')}" aria-label="${esc(t('调整顺序：', 'Reorder: ') + name)}">${icon('grip')}</button>` : icon('file')}<div class="detected-label"><span class="detected-name">${esc(name)}</span>${source ? `<small class="source-note">${esc(source)}</small>` : ''}</div></div><div class="actions">${section.text !== undefined ? `<button type="button" class="section-action" data-section-preview="${esc(section.name)}">${icon('eye')}${t('预览', 'Preview')}</button>` : ''}${editable ? `<button type="button" class="section-action" data-section-edit="${esc(section.name)}">${icon('edit')}${t('编辑', 'Edit')}</button>` : ''}${editable || section.toggleable ? `<label class="switch"><input type="checkbox" data-section-enabled="${esc(section.name)}" aria-label="${esc(t('启用 ', 'Enable ') + name)}" ${section.enabled ? 'checked' : ''}><span class="track"></span></label>` : ''}</div></div>`;
         };
         const system = items.filter(section => ![AGENT, DIRECTORY_AGENT].includes(section.name));
-        const user = [];
-        if (preview?.runtimeContext) user.push({ name: 'workshop:user-runtime', text: preview.runtimeContext, editable: false });
-        if (preview?.skillPrompt) user.push({ name: 'workshop:user-skill', text: preview.skillPrompt, editable: false });
-        user.push(...(preview?.userSections || []).filter(section => section.name === 'time-context'));
-        user.push(...(preview?.userSections || []).filter(section => section.name !== 'time-context'));
-        if (agent) user.push({ ...agent, ...(draft.prompt.sections[AGENT] || {}) });
-        if (agent?.directoryText) user.push({ name: DIRECTORY_AGENT, text: agent.directoryText, editable: false });
-        $('section-list').innerHTML = `<div class="section-level"><h4>System</h4>${system.map(section => row(section)).join('') || `<div class="empty-state">${icon('box')}<span>${t('未发现 System 内容', 'No System content detected')}</span></div>`}</div><div class="section-level user-level"><h4>User</h4>${user.map(section => row(section, { agent: section.name === AGENT, userOnly: section.name !== AGENT })).join('') || `<div class="empty-state">${icon('box')}<span>${t('暂无 User 级上下文', 'No User context')}</span></div>`}</div>`;
+        const saved = name => draft.prompt.sections[name] || {};
+        const user = [
+          ...(preview?.runtimeContextWorkingDirectory ? [{ name: 'workshop:user-cwd', text: preview.runtimeContextWorkingDirectory }] : []),
+          ...((preview?.runtimeContextSource || preview?.runtimeContext) ? [{ name: 'workshop:user-runtime', text: preview.runtimeContextEnvironmentSource, enabled: saved('workshop:user-runtime').enabled !== false, order: 0, toggleable: true, editable: false, reorderable: false }] : []),
+          ...(preview?.skillPrompt ? [{ name: 'workshop:user-skill', text: preview.skillPrompt, editable: false, reorderable: false, order: 100 }] : []),
+          ...(preview?.userSections || []).filter(section => section.name === 'time-context').map(section => ({ ...section, ...saved(section.name), order: 200, reorderable: false })),
+          ...(preview?.userSections || []).filter(section => section.name !== 'time-context').map(section => ({ ...section, reorderable: false })),
+          ...(agent ? [{ ...agent, ...saved(AGENT), name: AGENT, order: 300, reorderable: false }] : []),
+          ...Object.entries(draft.prompt.sections).filter(([, section]) => section.custom && section.role === 'user').map(([name, section]) => ({ name, ...section, reorderable: false })),
+          ...(agent?.directoryText ? [{ name: USER_DIRECTORY, text: agent.directoryText, enabled: saved(USER_DIRECTORY).enabled !== false, toggleable: true, editable: false, reorderable: false }] : []),
+        ];
+        const userRow = section => section.name === 'workshop:user-cwd' ? `<div class="detected-row" data-section-id="${section.name}"><div class="detected-source">${icon('file')}<div class="detected-label"><span class="detected-name">${t('工作目录', 'Working directory')}</span></div></div><div class="actions"><button type="button" class="section-action" data-section-preview="${section.name}">${icon('eye')}${t('预览', 'Preview')}</button></div></div>` : row(section, { agent: section.name === AGENT, directory: section.name === USER_DIRECTORY || section.name === DIRECTORY_AGENT });
+        $('section-list').innerHTML = `<div class="section-level"><h4>System</h4>${system.map(section => row(section)).join('') || `<div class="empty-state">${icon('box')}<span>${t('未发现 System 内容', 'No System content detected')}</span></div>`}</div><div class="section-level user-level"><h4>User</h4>${user.map(userRow).join('') || `<div class="empty-state">${icon('box')}<span>${t('暂无 User 级上下文', 'No User context')}</span></div>`}</div>`;
       }
       function renderPreview() {
         if (!preview) return;
-        $('preview-summary').textContent = t(`${preview.tools.length} 个工具 · ${preview.skills.length} 个技能 · 约 ${preview.estimatedTokens.toLocaleString()} tokens`, `${preview.tools.length} tools · ${preview.skills.length} skills · ~${preview.estimatedTokens.toLocaleString()} tokens`);
-        $('preview-prompt').textContent = preview.displayPrompt;
+        const mcpRows = preview.mcp || [];
+        const enabledMcp = mcpRows.length ? mcpRows.filter(server => server.source !== 'unknown' && (server.source === 'preset' ? (draft.mcp || []).find(item => item.serverName === server.serverName)?.enabled !== false : draft.mcpEnabled?.[server.serverName] !== false)).length : (draft.mcp || []).filter(server => server.enabled !== false).length + Object.values(draft.mcpEnabled || {}).filter(enabled => enabled !== false).length;
+        const tokenRange = preview.estimatedTokenRange || { min: preview.estimatedTokens, max: preview.estimatedTokens };
+        const summary = t(`${preview.tools.length} 个工具 · ${enabledMcp} 个MCP · ${preview.skills.length} 个技能 · 约 ${tokenRange.min.toLocaleString()}–${tokenRange.max.toLocaleString()} token`, `${preview.tools.length} tools · ${enabledMcp} MCP · ${preview.skills.length} skills · ~${tokenRange.min.toLocaleString()}–${tokenRange.max.toLocaleString()} tokens`);
+        $('preview-summary').textContent = summary;
+        $('preview-dialog-summary').textContent = summary;
+        $('preview-open').disabled = false;
+        const visibleTools = preview.tools.filter(tool => !tool.function.name.startsWith('mcp__'));
+        const mcpTools = preview.tools.filter(tool => tool.function.name.startsWith('mcp__'));
+        const fragment = (label, text, kind = '') => text ? `<section class="prompt-fragment ${kind}"><h4>${esc(label)}</h4><div class="prompt-fragment-body">${esc(text)}</div></section>` : '';
+        const toolText = items => items.map(tool => `${tool.function.name}: ${tool.function.description}`).join('\n\n');
+        const userSections = (preview.userSections || []).filter(section => section.text?.trim());
+        const customUser = Object.entries(draft.prompt.sections).filter(([, section]) => section.custom && section.role === 'user' && section.enabled).map(([name, section]) => ({ name, text: section.text, order: section.order }));
+        const workingDirectory = preview.runtimeContextWorkingDirectory || '';
+        const environmentText = preview.runtimeContextEnvironment || '';
+        const userParts = [
+          fragment(t('用户消息', 'User message'), t('［用户第一句话 · 仅作占位，预设工坊不修改会话消息。］', '[First user message · Placeholder only; the preset workshop does not edit session messages.]'), 'message-fragment'),
+          fragment(t('工作目录', 'Working directory'), workingDirectory, 'working-directory-fragment'),
+          fragment(t('环境', 'Environment'), draft.prompt.sections['workshop:user-runtime']?.enabled === false ? '' : environmentText, 'environment-fragment'),
+          fragment('SKILL', preview.skillPrompt, 'skill-fragment'),
+          ...userSections.filter(section => section.enabled !== false).map(section => fragment(section.name === 'time-context' ? t('时间与时区', 'Time and time zone') : section.name === 'prompt-manager-catalog' ? t('提示词管理（会话实况）', 'Prompt manager (session context)') : section.name, section.text, section.name === 'time-context' ? 'time-fragment' : 'user-extra-fragment')),
+          fragment(t('AGENTS「全局」', 'AGENTS (Global)'), preview.agentInstructions?.enabled ? preview.agentInstructions.renderedText : '', 'agent-fragment'),
+          ...customUser.map(section => fragment(section.name, section.text, 'custom-fragment')),
+          fragment(t('AGENTS「目录」', 'AGENTS (Directory)'), draft.prompt.sections[USER_DIRECTORY]?.enabled === false ? '' : preview.agentInstructions?.directoryText, 'agent-fragment'),
+        ].filter(Boolean).join('');
+        const toolParts = `${fragment('TOOL', toolText(visibleTools), 'tool-fragment')}${fragment('MCP', toolText(mcpTools), 'mcp-fragment')}`;
+        $('preview-prompt').innerHTML = `<section class="prompt-major system-major"><h3>System</h3>${preview.prompt ? `<div class="prompt-major-content">${esc(preview.prompt)}</div>` : ''}</section><section class="prompt-major user-major"><h3>User</h3>${userParts}</section>${toolParts ? `<section class="prompt-major tool-major"><h3>${t('工具', 'Tools')}</h3>${toolParts}</section>` : ''}`;
         const pending = state.sessions.filter(session => session.preset === draft.id && session.pendingTools?.length), selectedPending = preview.runtime?.pendingTools || [];
         const pendingNames = [...new Set([...pending.flatMap(session => session.pendingTools), ...selectedPending])].filter(Boolean);
         $('runtime-note').hidden = !pending.length && !selectedPending.length;
@@ -217,15 +280,13 @@ window.__ModuleLoader__.load({
           ? t(`关闭并恢复会话后才能使用：${pendingNames.join('、')}。`, `Close and restore sessions to use: ${pendingNames.join(', ')}.`)
           : t('关闭并恢复相关会话后才能使用新增或替换的工具。', 'Close and restore the affected sessions to use newly added or replaced tools.');
         $('runtime-note').textContent = t(`预览为当前方案。${pending.length} 个已开始会话尚未挂载新增或替换工具；${restoreNotice}人设、已有工具过滤与描述、技能选择在下一次请求更新。`, `This preview shows the current preset. ${pending.length} started sessions have not mounted new or replaced tools; ${restoreNotice} Persona, existing-tool filters/descriptions and skill selections update on the next request.`);
-        $('runtime-tools').hidden = !preview.runtime;
-        $('runtime-tools').textContent = preview.runtime ? t('所选会话实际工具：', 'Actual tools in the selected session: ') + preview.runtime.tools.map(tool => tool.function.name).join('、') : '';
         $('pane-overview').innerHTML = `<h3>${t('启用的工具', 'Enabled tools')}</h3><div class="chips">${preview.tools.filter(tool => !tool.function.name.startsWith('mcp__')).map(tool => `<span class="chip mono">${esc(tool.function.name)}</span>`).join('') || `<span class="muted">${t('尚未启用工具', 'No tools enabled')}</span>`}</div><h3 style="margin-top:12px">${t('MCP', 'MCP')}</h3><div class="chips">${(preview.mcp || []).flatMap(server => server.tools).filter(tool => draft.tools.enabled.includes(tool.function?.name ?? tool.name)).map(tool => `<span class="chip mono">${esc(tool.function?.name ?? tool.name)}</span>`).join('') || `<span class="muted">${t('尚未启用 MCP 工具', 'No MCP tools enabled')}</span>`}</div><h3 style="margin-top:12px">${t('绑定的技能', 'Selected skills')}</h3><div class="chips">${preview.skills.map(skill => `<span class="chip">${esc(skill.name)}</span>`).join('') || `<span class="muted">${t('尚未绑定技能', 'No skills selected')}</span>`}</div>${draft.skills.length && !preview.skillCatalog.length ? `<p class="source-note">${preview.tools.some(tool => tool.function.name === 'skill') ? t('所选技能目录尚未发布，请查看技能来源与扫描诊断。', 'The selected skill catalog is unavailable; check source and discovery diagnostics.') : t('尚未开启 skill 工具，技能摘要不会自动发布。', 'The skill tool is disabled, so its catalog is not automatically published.')}</p>` : ''}`;
         $('variable-list').innerHTML = Object.entries(preview.variables).map(([key, value]) => `<div class="variable-row"><code>{{${esc(key)}}}</code><span>${esc(value ?? t('当前未定义', 'Currently undefined'))}</span></div>`).join('');
         if (!cwd) { cwd = preview.cwd; $('preview-cwd').value = cwd; }
       }
       async function refreshPreview(withSkills = false) {
         const version = ++previewVersion, id = draft.id, input = { id, draft: clone(draft), ...context() };
-        $('preview-summary').textContent = t('生成预览…', 'Generating preview…');
+        $('preview-summary').textContent = t('生成预览…', 'Generating preview…'); $('preview-dialog-summary').textContent = t('生成预览…', 'Generating preview…'); $('preview-open').disabled = true;
         $('copy-preview').disabled = true;
         previewQueue = previewQueue.then(async () => {
           if (version !== previewVersion || signal.aborted) return;
@@ -242,12 +303,12 @@ window.__ModuleLoader__.load({
           renderPreview(); sections(); tools(); mcp(); skills(); status();
         } catch (error) {
           if (version !== previewVersion || signal.aborted) return;
-          preview = undefined; $('preview-prompt').textContent = ''; $('preview-summary').textContent = t('预览失败', 'Preview failed'); report(error); status();
+          preview = undefined; $('preview-prompt').replaceChildren(); $('preview-summary').textContent = t('预览失败', 'Preview failed'); $('preview-dialog-summary').textContent = t('预览失败', 'Preview failed'); $('preview-open').disabled = true; report(error); status();
           }
         });
         return previewQueue;
       }
-      function changed() { previewVersion++; clearTimeout(previewTimer); status(); $('copy-preview').disabled = true; $('preview-summary').textContent = t('生成预览…', 'Generating preview…'); previewTimer = setTimeout(() => refreshPreview(), 350); }
+      function changed() { previewVersion++; clearTimeout(previewTimer); status(); $('preview-open').disabled = true; $('copy-preview').disabled = true; $('preview-summary').textContent = t('生成预览…', 'Generating preview…'); $('preview-dialog-summary').textContent = t('生成预览…', 'Generating preview…'); previewTimer = setTimeout(() => refreshPreview(), 350); }
       function renderContextOptions() {
         if (!state.sessions.some(session => session.id === sessionId)) sessionId = '';
         const current = state.sessions.find(session => session.id === sessionId), key = session => [session.cwd, session.provider, session.model, session.permissions?.sandbox, session.permissions?.approval].join('\0'), contexts = [...new Map(state.sessions.map(session => [key(session), session])).values()];
@@ -257,7 +318,7 @@ window.__ModuleLoader__.load({
       }
       function render(reset = true) {
         if (reset) { base = clone(selected()); draft = clone(base); preview = undefined; }
-        pickers(); $('preset-id').value = draft.id; $('preset-description').value = draft.description; $('persona').value = draft.prompt.persona;
+        pickers(); $('preset-id').value = draft.id; $('preset-description').value = draft.description; $('persona').value = draft.prompt.persona; fitPromptEditor($('persona'));
         $('preset-enabled').checked = draft.enabled; $('preset-enabled').disabled = draft.builtin; $('delete-preset').disabled = draft.builtin;
         tools(); skills(); sections(); mcp(); scanStatus(); status(); renderContextOptions();
         const warning = state.roster.find(p => p.id === draft.id)?.broken;
@@ -272,15 +333,18 @@ window.__ModuleLoader__.load({
         render(false); await refreshPreview(); toast(t('已保存。', 'Saved.'));
         return true;
       }
-      function dialog(title, subtitle, body, handler, label = t('保存', 'Save')) {
+      function dialog(title, subtitle, body, handler, label = t('保存', 'Save'), beforeActions = '') {
         $('dialog-body').onclick = null; $('dialog-body').oninput = null;
         $('dialog-title').textContent = title; $('dialog-subtitle').textContent = subtitle; $('dialog-body').innerHTML = body;
-        $('dialog-save').textContent = label; $('dialog-save').hidden = false; $('dialog-cancel').hidden = false; submit = handler; closePickers(); $('editor-dialog').showModal();
+        $('dialog-footer').innerHTML = `${beforeActions}<span></span><button type="button" id="dialog-cancel">取消</button><button type="submit" class="primary" id="dialog-save">${label}</button>`;
+        $('dialog-save').hidden = false; $('dialog-cancel').hidden = false; submit = handler; closePickers(); $('editor-dialog').showModal();
+        $('dialog-cancel').onclick = closeDialog;
       }
       function closeDialog() { if (dialogPending) return; $('editor-dialog').close(); submit = undefined; }
       $('editor-dialog').addEventListener('cancel', event => { event.stopPropagation(); if (dialogPending) event.preventDefault(); });
       $('dialog-close').onclick = closeDialog; $('dialog-cancel').onclick = closeDialog;
-      $('editor-dialog').addEventListener('close', () => { submit = undefined; });
+      // A conflict dialog reopens in a queued task; a queued close event from the
+      // previous dialog must not clear the handler the new one just installed.
       $('editor-dialog').addEventListener('click', event => { if (event.target !== $('editor-dialog')) return; const rect = event.target.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) closeDialog(); });
       $('dialog-form').onsubmit = async event => {
         event.preventDefault(); if ($('dialog-save').disabled) return;
@@ -291,19 +355,28 @@ window.__ModuleLoader__.load({
         finally { dialogPending = false; for (const id of ['dialog-save', 'dialog-cancel', 'dialog-close']) $(id).disabled = false; }
       };
       function openSection(id, edit) {
-        let section = id === AGENT ? { ...preview.agentInstructions, ...(draft.prompt.sections[AGENT] || {}) } : id === DIRECTORY_AGENT ? { text: preview.agentInstructions.directoryText, editable: false } : supplemental().find(item => item.name === id);
-        if (id === 'workshop:user-runtime') section = { name: id, text: preview.runtimeContext, editable: false };
+        if (id === 'workshop:user-cwd') { dialog(t('预览', 'Preview'), t('工作目录', 'Working directory'), `<pre class="preview-code section-preview">${esc(preview?.runtimeContextWorkingDirectory || '')}</pre>`, () => {}, t('关闭', 'Close')); $('dialog-cancel').hidden = true; return; }
+        if (id === 'workshop:user-runtime') { dialog(t('预览', 'Preview'), t('环境', 'Environment'), `<pre class="preview-code section-preview">${esc(preview?.runtimeContextEnvironmentSource || '')}</pre>`, () => {}, t('关闭', 'Close')); $('dialog-cancel').hidden = true; return; }
+        let section = id === AGENT ? { ...preview.agentInstructions, ...(draft.prompt.sections[AGENT] || {}) } : id === USER_DIRECTORY ? { text: preview.agentInstructions.directoryText, editable: false } : supplemental().find(item => item.name === id);
+        if (id === 'workshop:user-runtime') section = { name: id, text: preview.runtimeContextEnvironmentSource, editable: false, toggleable: true, order: draft.prompt.sections[id]?.order ?? 0, enabled: draft.prompt.sections[id]?.enabled !== false };
         if (id === 'workshop:user-skill') section = { name: id, text: preview.skillPrompt, editable: false };
         section ||= preview.userSections?.find(item => item.name === id);
         if (!section) return;
         if (edit && (section.editable === false || section.managedBy === 'host')) return;
-        const name = id === AGENT ? 'AGENTS' : id === DIRECTORY_AGENT ? t('AGENTS（目录级）', 'AGENTS (Directory)') : id === 'time-context' ? t('时间与时区', 'Time and time zone') : id === 'deployment:persona-suffix' ? t('补充指令', 'Supplemental instructions') : id === 'workshop:tool-guidance' ? t('工具使用指令', 'Tool usage guidance') : id.replace(/\.md$/i, '');
+        const name = id === AGENT ? globalAgentDescription() : id === USER_DIRECTORY ? directoryAgentDescription() : sectionName({ name: id });
         const guidance = id === 'workshop:tool-guidance';
         const editor = guidance ? section.members.map((member, index) => `<label class="field">${esc(member.name)}<textarea class="guidance-editor" data-guidance-member="${index}" spellcheck="false" maxlength="200000">${esc(draft.prompt.sections[member.name]?.text ?? member.text)}</textarea></label>`).join('') : `<textarea class="section-modal-editor" id="section-content" spellcheck="false" maxlength="200000" aria-label="${esc(name)}">${esc(section.text)}</textarea>`;
-        dialog((edit ? t('编辑 ', 'Edit ') : t('预览 ', 'Preview ')) + name, id === AGENT ? t('官方全局 AGENTS.md · 仅覆盖当前预设，保留项目与子目录指令，不修改原文件。', 'Official global AGENTS.md. Edits affect this preset only; project/subdirectory instructions and source files are preserved.') : id === DIRECTORY_AGENT ? t('宿主自动载入当前目录的指令；不与 System 段排序。', 'The host loads directory instructions automatically; they are not System sections.') : id === 'time-context' ? t('由宿主生成的时间与时区；没有会话实况时展示当前样本，实际值在发送请求时生成。关闭后停止追加，已发送的历史内容保留。', 'Host-generated time and time zone. Without a session snapshot, this shows a current sample; request values are generated when sent. Turning it off stops new readings and preserves history.') : section.delivery === 'user-message' ? t('所选会话中已实际注入的 User 内容，只读。', 'Read-only User content already injected into the selected session.') : guidance ? t('逐段编辑原生工具指令；工具切换时仍会动态增减，工具描述单独管理。', 'Edit native tool instructions individually. Sections still follow tool visibility; schema descriptions are managed separately.') : t('System 级文本；保存后按此顺序生效。', 'System-level text. Save to apply its order.'), edit ? editor + `${section.custom ? `<button type="button" class="text-button danger" id="delete-section">${icon('trash')}${t('删除此内容', 'Delete content')}</button>` : ''}<p id="dialog-error" class="error-message" role="alert"></p>` : `<pre class="preview-code section-preview">${esc((section.renderedText ?? section.text) || t('当前没有内容。', 'No content currently.'))}</pre>`, () => { if (edit) {
+        const title = edit ? t('编辑', 'Edit') : t('预览', 'Preview');
+        const extra = edit && section.custom ? `<label class="field">${t('名称', 'Name')}<input id="section-name" maxlength="256" value="${esc(id)}" required></label>` : '';
+        dialog(title, name, edit ? `${extra}${editor}<p id="dialog-error" class="error-message" role="alert"></p>` : `<pre class="preview-code section-preview">${esc((section.renderedText ?? section.text) || t('当前没有内容。', 'No content currently.'))}</pre>`, () => { if (edit) {
+          const targetId = section.custom ? $('section-name').value.trim() : id;
+          if (section.custom && (!targetId || /[\x00-\x1f\x7f]/.test(targetId) || Object.hasOwn(draft.prompt.sections, targetId) && targetId !== id)) throw Error(t('名称为空或已被占用，请换一个。', 'Choose a nonempty, unique name.'));
           if (guidance) root.querySelectorAll('[data-guidance-member]').forEach(el => { const member = section.members[Number(el.dataset.guidanceMember)]; draft.prompt.sections[member.name] = { text: el.value, order: member.order, enabled: draft.prompt.sections[member.name]?.enabled ?? true }; });
-          draft.prompt.sections[id] = { ...(section.custom ? { custom: true } : {}), text: guidance ? '' : $('section-content').value, order: section.order, enabled: section.enabled }; sections(); changed();
-        } }, edit ? t('完成', 'Done') : t('关闭', 'Close'));
+          if (section.custom) { if (targetId !== id) delete draft.prompt.sections[id]; draft.prompt.sections[targetId] = { custom: true, ...(section.role ? { role: section.role } : {}), text: $('section-content').value, order: section.order, enabled: section.enabled }; }
+          else draft.prompt.sections[id] = { ...(section.custom ? { custom: true, ...(section.role ? { role: section.role } : {}) } : {}), text: guidance || ['time-context', 'workshop:user-runtime'].includes(id) ? '' : $('section-content').value, order: section.order, enabled: section.enabled };
+          sections(); changed();
+        } }, edit ? t('保存', 'Save') : t('关闭', 'Close'), section.custom && edit ? `<button type="button" class="danger" id="delete-section">${icon('trash')}${t('删除此内容', 'Delete content')}</button>` : '');
+        root.querySelectorAll('.guidance-editor,.section-modal-editor').forEach(textarea => { const fit = () => { textarea.style.height = 'auto'; textarea.style.height = `${Math.min(textarea.scrollHeight, 360, Math.floor(window.innerHeight * .45))}px`; }; fit(); textarea.addEventListener('input', fit); });
         if (section.custom && edit) $('delete-section').onclick = () => { delete draft.prompt.sections[id]; closeDialog(); sections(); changed(); };
         $('dialog-cancel').hidden = !edit;
       }
@@ -520,7 +593,7 @@ window.__ModuleLoader__.load({
         const picker = event.target.closest('.select-card');
         if (picker && ['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) { event.preventDefault(); picker.open = true; const all = [...picker.querySelectorAll('.select-option')], index = all.indexOf(root.activeElement); all[event.key === 'Home' ? 0 : event.key === 'End' ? all.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : all.length - 1)) % all.length]?.focus(); }
         const handle = event.target.closest('[data-drag-section]');
-        if (handle && event.target.closest('.drag-handle') && ['ArrowUp', 'ArrowDown'].includes(event.key)) { event.preventDefault(); const items = supplemental().filter(s => s.reorderable !== false && s.managedBy !== 'host'), index = items.findIndex(s => s.name === handle.dataset.dragSection), next = index + (event.key === 'ArrowUp' ? -1 : 1); if (items[next]) { move(items[index].name, items[next].name, next < index); root.querySelector(`[data-drag-section="${CSS.escape(handle.dataset.dragSection)}"] .drag-handle`)?.focus(); } }
+        if (handle && event.target.closest('.drag-handle') && ['ArrowUp', 'ArrowDown'].includes(event.key)) { event.preventDefault(); const userLevel = handle.closest('.section-level')?.classList.contains('user-level'), items = userLevel ? [...handle.closest('.section-level').querySelectorAll('[data-drag-section]')].map(row => ({ name: row.dataset.sectionId })) : supplemental().filter(s => s.reorderable !== false && s.managedBy !== 'host'), index = items.findIndex(s => s.name === handle.dataset.dragSection), next = index + (event.key === 'ArrowUp' ? -1 : 1); if (items[next]) { move(items[index].name, items[next].name, next < index); root.querySelector(`[data-drag-section="${CSS.escape(handle.dataset.dragSection)}"] .drag-handle`)?.focus(); } }
       });
       root.addEventListener('change', event => {
         const el = event.target;
@@ -533,10 +606,19 @@ window.__ModuleLoader__.load({
           mcp(); changed();
         }
         if (el.dataset.package) { draft.tools.packages = el.checked ? [...new Set([...draft.tools.packages, el.dataset.package])] : draft.tools.packages.filter(x => x !== el.dataset.package); tools(); changed(); }
-        if (el.dataset.skill) { draft.skills = el.checked ? [...new Set([...draft.skills, el.dataset.skill])] : draft.skills.filter(x => x !== el.dataset.skill); if (el.checked && toolSource('skill')?.available) draft.tools.enabled = [...new Set([...draft.tools.enabled, 'skill'])]; tools(); changed(); }
-        if (el.dataset.sectionEnabled) { const id = el.dataset.sectionEnabled, section = id === AGENT ? { ...preview.agentInstructions, ...(draft.prompt.sections[AGENT] || {}) } : id === 'time-context' ? preview.userSections.find(s => s.name === id) : supplemental().find(s => s.name === id); draft.prompt.sections[id] = { ...(section.custom ? { custom: true } : {}), text: ['workshop:tool-guidance', 'time-context'].includes(id) ? '' : section.text, order: section.order, enabled: el.checked }; changed(); }
+        if (el.dataset.skill) { draft.skills = el.checked ? [...new Set([...draft.skills, el.dataset.skill])] : draft.skills.filter(x => x !== el.dataset.skill); el.closest('.skill-row')?.classList.toggle('off', !el.checked); if (el.checked && toolSource('skill')?.available) draft.tools.enabled = [...new Set([...draft.tools.enabled, 'skill'])]; tools(); changed(); }
+        if (el.dataset.sectionEnabled) { const id = el.dataset.sectionEnabled, section = id === AGENT ? { ...preview.agentInstructions, ...(draft.prompt.sections[AGENT] || {}) } : id === USER_DIRECTORY ? { text: preview.agentInstructions?.directoryText, order: 10000, ...draft.prompt.sections[id] } : id === 'workshop:user-runtime' ? { text: preview.runtimeContextEnvironmentSource, order: 0, ...draft.prompt.sections[id] } : id === 'time-context' ? preview.userSections.find(s => s.name === id) : supplemental().find(s => s.name === id) || draft.prompt.sections[id]; if (!section) return; draft.prompt.sections[id] = { ...(section.custom ? { custom: true, ...(section.role ? { role: section.role } : {}) } : {}), text: ['workshop:tool-guidance', 'time-context', 'workshop:user-runtime', USER_DIRECTORY].includes(id) ? '' : section.text, order: section.order ?? 0, enabled: el.checked }; el.closest('.detected-row')?.classList.toggle('off', !el.checked); changed(); }
       });
       function move(source, target, before) {
+        const sourceRow = root.querySelector(`[data-section-id="${CSS.escape(source)}"]`), targetRow = root.querySelector(`[data-section-id="${CSS.escape(target)}"]`);
+        if (sourceRow?.closest('.section-level')?.classList.contains('user-level')) {
+          if (!targetRow || targetRow.closest('.section-level') !== sourceRow.closest('.section-level')) return;
+          const rows = [...sourceRow.parentElement.querySelectorAll('[data-drag-section]')], names = rows.map(row => row.dataset.sectionId), item = names.splice(names.indexOf(source), 1)[0], index = names.indexOf(target);
+          if (!item || index < 0) return;
+          names.splice(index + (before ? 0 : 1), 0, item);
+          names.forEach((name, position) => { const row = rows.find(value => value.dataset.sectionId === name), prior = draft.prompt.sections[name], order = position * 100; draft.prompt.sections[name] = { ...(row.dataset.custom === 'true' ? { custom: true, role: row.dataset.role || 'system' } : {}), text: userSectionText(name), enabled: prior?.enabled ?? !row.classList.contains('off'), order }; });
+          sections(); changed(); return;
+        }
         const all = supplemental(), items = all.filter(s => s.reorderable !== false && s.managedBy !== 'host'), slots = items.map(s => s.order), item = items.find(s => s.name === source);
         if (!item || source === target) return;
         // Keep native slots; separate equal-order slots before the next section.
@@ -554,18 +636,24 @@ window.__ModuleLoader__.load({
         sections(); changed();
       }
       $('section-list').addEventListener('dragstart', event => { const handle = event.target.closest('.drag-handle'), row = handle?.closest('[data-drag-section]'); if (!row) { event.preventDefault(); return; } dragged = row.dataset.dragSection; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', dragged); row.classList.add('is-dragging'); });
-      $('section-list').addEventListener('dragover', event => { const row = event.target.closest('[data-section-id]'), source = dragged && root.querySelector(`[data-section-id="${CSS.escape(dragged)}"]`); if (!dragged || !row || row.dataset.sectionId === AGENT || row.dataset.sectionId === dragged || source?.closest('.section-level') !== row.closest('.section-level')) return; event.preventDefault(); event.dataTransfer.dropEffect = 'move'; root.querySelectorAll('.drag-before,.drag-after').forEach(item => item.classList.remove('drag-before', 'drag-after')); row.classList.add(event.clientY < row.getBoundingClientRect().top + row.offsetHeight / 2 ? 'drag-before' : 'drag-after'); });
-      $('section-list').addEventListener('drop', event => { const row = event.target.closest('[data-section-id]'), source = dragged && root.querySelector(`[data-section-id="${CSS.escape(dragged)}"]`); if (dragged && row && row.dataset.sectionId !== AGENT && row.dataset.sectionId !== dragged && source?.closest('.section-level') === row.closest('.section-level')) { event.preventDefault(); move(dragged, row.dataset.sectionId, event.clientY < row.getBoundingClientRect().top + row.offsetHeight / 2); } dragged = undefined; sections(); });
+      $('section-list').addEventListener('dragover', event => { const row = event.target.closest('[data-section-id]'), source = dragged && root.querySelector(`[data-section-id="${CSS.escape(dragged)}"]`); if (!dragged || !row || !row.hasAttribute('data-drag-section') || row.dataset.sectionId === dragged || source?.closest('.section-level') !== row.closest('.section-level')) return; event.preventDefault(); event.dataTransfer.dropEffect = 'move'; root.querySelectorAll('.drag-before,.drag-after').forEach(item => item.classList.remove('drag-before', 'drag-after')); row.classList.add(event.clientY < row.getBoundingClientRect().top + row.offsetHeight / 2 ? 'drag-before' : 'drag-after'); });
+      $('section-list').addEventListener('drop', event => { const row = event.target.closest('[data-section-id]'), source = dragged && root.querySelector(`[data-section-id="${CSS.escape(dragged)}"]`); if (dragged && row?.hasAttribute('data-drag-section') && row.dataset.sectionId !== dragged && source?.closest('.section-level') === row.closest('.section-level')) { event.preventDefault(); move(dragged, row.dataset.sectionId, event.clientY < row.getBoundingClientRect().top + row.offsetHeight / 2); } dragged = undefined; sections(); });
       $('section-list').addEventListener('dragend', event => { event.target.closest('[data-drag-section]')?.classList.remove('is-dragging'); root.querySelectorAll('.drag-before,.drag-after').forEach(item => item.classList.remove('drag-before', 'drag-after')); dragged = undefined; });
-      $('persona').oninput = event => { draft.prompt.persona = event.target.value; changed(); };
+      function userSectionText(name) { return name === AGENT ? draft.prompt.sections[name]?.text ?? preview?.agentInstructions?.text ?? '' : draft.prompt.sections[name]?.text ?? ''; }
+      const fitPromptEditor = editor => { editor.style.height = `${Math.max(188, Math.min(editor.scrollHeight, 360, Math.floor(window.innerHeight * .55)))}px`; };
+      $('persona').oninput = event => { fitPromptEditor(event.target); draft.prompt.persona = event.target.value; changed(); };
+      fitPromptEditor($('persona'));
       $('preset-description').oninput = event => { draft.description = event.target.value; status(); };
       $('save-preset').onclick = () => run(() => save({ name: draft.name, description: draft.description, prompt: draft.prompt, tools: draft.tools, skills: draft.skills, mcp: draft.mcp, mcpEnabled: draft.mcpEnabled }));
       const dialogError = '<p id="dialog-error" class="error-message" role="alert"></p>';
-      $('add-section').onclick = () => dialog(t('新建内容', 'New content'), t('添加可排序的 System 级文本；不会修改其他插件或 AGENT。', 'Add sortable System-level text to this preset.'), `<label class="field">${t('名称', 'Name')}<input id="new-section-name" maxlength="256" required></label><label class="field">${t('内容', 'Content')}<textarea class="section-modal-editor" id="section-content" maxlength="200000" required></textarea></label>${dialogError}`, () => {
+      $('add-section').onclick = () => {
+        dialog(t('新建内容', 'New content'), t('添加可排序的 System 级文本', 'Add sortable System-level text'), `<label class="field">${t('名称', 'Name')}<input id="new-section-name" maxlength="256" required></label><label class="field">${t('内容', 'Content')}<textarea class="section-modal-editor" id="section-content" maxlength="200000" required></textarea></label>${dialogError}`, () => {
         const name = $('new-section-name').value.trim();
         if (!name || /[\x00-\x1f\x7f]/.test(name) || name.startsWith('tool:') || ['__proto__', 'constructor', 'prototype', 'workshop:agent-instructions', 'workshop:directory-instructions', 'workshop:tool-guidance', 'preset-workshop:persona', 'harness:identity', 'deployment:persona-prefix'].includes(name) || supplemental().some(section => section.name === name) || Object.hasOwn(draft.prompt.sections, name)) throw Error(t('名称为空、已被占用或属于保留名称，请换一个。', 'Choose a nonempty, unique, nonreserved name.'));
-        draft.prompt.sections[name] = { text: $('section-content').value, order: Math.max(0, ...supplemental().map(section => section.order)) + 100, enabled: true, custom: true }; sections(); changed();
-      }, t('添加', 'Add'));
+        const sameRole = Object.values(draft.prompt.sections).filter(section => !section.role || section.role === 'system').map(section => section.order);
+        draft.prompt.sections[name] = { text: $('section-content').value, order: Math.max(0, ...sameRole) + 100, enabled: true, custom: true }; sections(); changed();
+      }, t('保存', 'Save'));
+      };
       $('create-preset').onclick = () => dialog(t('新建预设', 'New preset'), t('ID 创建后不可修改；显示名可随时调整。', 'The ID is immutable; the display name can be changed.'), `<label class="field">${t('显示名称', 'Display name')}<input id="new-name" maxlength="160" required></label><label class="field">${t('预设 ID', 'Preset ID')}<input id="new-id" maxlength="64" pattern="[a-z0-9][a-z0-9_-]{0,63}" required></label>${dirty() ? `<p class="source-note">${t('创建后将切换到新预设，当前未保存编辑会丢弃。', 'Creating switches to the new preset and discards current unsaved edits.')}</p>` : ''}${dialogError}`, async () => { state = await request('create', { id: $('new-id').value, name: $('new-name').value }); render(); await refreshPreview(true); });
       $('rename-preset').onclick = () => dialog(t('重命名', 'Rename'), t('修改显示名称，不影响会话绑定。', 'The preset ID and session bindings are preserved.'), `<label class="field">${t('显示名称', 'Display name')}<input id="new-name" maxlength="160" value="${esc(draft.name)}" required></label>${dialogError}`, () => save({ name: $('new-name').value.trim() }));
       async function remove(disable) {
@@ -580,13 +668,18 @@ window.__ModuleLoader__.load({
       $('scan-interval').onchange = event => settings({ scanInterval: Number(event.target.value) });
       $('scan-tools').onclick = () => run(async () => {
         state = await request('scan', { id: draft.id, ...context() }); tools(); scanStatus(); await refreshPreview(true);
-        const count = state.catalog.counts;
-        toast(t(`扫描完成：${count.tools} 个工具（MCP：${count.mcpServers} 个服务、${count.mcpTools} 个工具）、${count.promptSections} 个提示词段、${count.skills} 个技能${count.complete ? '' : '（技能扫描未完整）'}。`, `Scan complete: ${count.tools} tools (MCP: ${count.mcpServers} services, ${count.mcpTools} tools), ${count.promptSections} prompt sections, ${count.skills} skills${count.complete ? '' : ' (skill discovery incomplete)'}.`));
+        toast(scanSentence(true));
       });
       $('skills-all').onclick = () => { const all = [...sourceSkills.map(skill => skill.name), ...draft.skills]; const complete = all.length > 0 && all.every(name => draft.skills.includes(name)); draft.skills = complete ? [] : [...new Set(all)]; if (draft.skills.length && toolSource('skill')?.available) draft.tools.enabled = [...new Set([...draft.tools.enabled, 'skill'])]; skills(); tools(); changed(); };
-      if ($('skills-none')) $('skills-none').onclick = () => { draft.skills = []; skills(); changed(); };
-      $('preview-cwd').oninput = event => { cwd = event.target.value.trim(); previewVersion++; clearTimeout(previewTimer); $('copy-preview').disabled = true; previewTimer = setTimeout(() => refreshPreview(true), 350); };
+      $('preview-cwd').oninput = event => { cwd = event.target.value.trim(); previewVersion++; clearTimeout(previewTimer); $('preview-open').disabled = true; $('copy-preview').disabled = true; $('preview-summary').textContent = t('生成预览…', 'Generating preview…'); $('preview-dialog-summary').textContent = t('生成预览…', 'Generating preview…'); previewTimer = setTimeout(() => refreshPreview(true), 350); };
       root.querySelectorAll('[data-tab]').forEach(button => { button.onclick = () => { root.querySelectorAll('[data-tab]').forEach(tab => { tab.classList.toggle('active', tab === button); tab.setAttribute('aria-selected', String(tab === button)); }); $('pane-overview').hidden = button.dataset.tab !== 'overview'; $('pane-prompt').hidden = button.dataset.tab !== 'prompt'; }; });
+      root.querySelectorAll('[data-config-tab]').forEach(button => { button.onclick = () => { root.querySelectorAll('[data-config-tab]').forEach(tab => { const active = tab === button; tab.classList.toggle('active', active); tab.setAttribute('aria-selected', String(active)); }); root.querySelectorAll('.config-pane').forEach(pane => { pane.hidden = pane.id !== `config-pane-${button.dataset.configTab}`; }); if (button.dataset.configTab === 'tools') requestAnimationFrame(fitToolLists); }; });
+      root.querySelectorAll('[data-compat-tab]').forEach(button => { button.onclick = () => { root.querySelectorAll('[data-compat-tab]').forEach(tab => { const active = tab === button; tab.classList.toggle('active', active); tab.setAttribute('aria-selected', String(active)); }); root.querySelectorAll('.compat-pane').forEach(pane => { pane.hidden = pane.id !== `compat-pane-${button.dataset.compatTab}`; }); }; });
+      $('preview-open').onclick = () => { if (preview) $('preview-dialog').showModal(); };
+      $('preview-close').onclick = () => $('preview-dialog').close();
+      $('preview-dialog').addEventListener('click', event => { if (event.target !== $('preview-dialog')) return; const rect = event.target.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) event.target.close(); });
+      window.addEventListener('resize', fitToolLists);
+      root.querySelectorAll('.tool-group').forEach(group => group.addEventListener('toggle', () => requestAnimationFrame(fitToolLists)));
       async function copy(text) { try { await navigator.clipboard.writeText(text); } catch { const area = document.createElement('textarea'); area.value = text; area.style.cssText = 'position:fixed;left:-9999px'; root.append(area); area.select(); const ok = document.execCommand('copy'); area.remove(); if (!ok) throw Error(t('无法自动复制，请手动选择文本。', 'Select and copy the text manually.')); } }
       $('copy-preview').onclick = async () => { try { if (!preview) return; await copy(preview.displayPrompt); toast(t('已复制。', 'Copied.')); } catch (error) { report(error); } };
       $('export-open').onclick = () => {
@@ -645,7 +738,7 @@ window.__ModuleLoader__.load({
       const offLocale = ctx.locale.subscribe(() => { english = ctx.locale.getSnapshot().active?.startsWith('en') ?? false; localize(); render(false); renderPreview(); });
       // Host owns automatic scanning. Poll only its snapshot, never duplicate scans.
       timer = setInterval(async () => { if (busy || dialogPending || signal.aborted) return; try { const snapshot = await request('snapshot'); const changedAt = snapshot.catalog.scannedAt !== state.catalog.scannedAt || snapshot.catalog.revision !== state.catalog.revision || snapshot.sourcesVersion !== state.sourcesVersion || (sessionId && snapshot.sessions.find(session => session.id === sessionId)?.contextVersion !== state.sessions.find(session => session.id === sessionId)?.contextVersion); state = snapshot; renderContextOptions(); if (changedAt) { tools(); scanStatus(); await refreshPreview(true); } } catch (error) { report(error); } }, 5000);
-      return () => { offLocale(); clearInterval(timer); clearTimeout(previewTimer); clearTimeout(toastTimer); scrollTimers.forEach(clearTimeout); root.removeEventListener('scroll', onScroll, true); $('editor-dialog').close(); };
+      return () => { offLocale(); clearInterval(timer); clearTimeout(previewTimer); clearTimeout(toastTimer); scrollTimers.forEach(clearTimeout); root.removeEventListener('scroll', onScroll, true); window.removeEventListener('resize', fitToolLists); $('editor-dialog').close(); $('preview-dialog').close(); };
     }
     function installNavIcon(ctx, label) {
       if (typeof document === 'undefined' || typeof MutationObserver === 'undefined') return;

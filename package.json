@@ -1,6 +1,6 @@
 {
   "name": "dsh-preset-workshop",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Preset Workshop · 预设工坊：让您的每一个Agent都有自己的工作方式",
   "type": "module",
   "license": "Apache-2.0",
@@ -36,10 +36,7 @@
     "assets"
   ],
   "scripts": {
-    "test": "node --test test/core.test.mjs test/client.test.mjs",
-    "test:host": "node --import ./tools/use-host.mjs test/host.test.mjs",
-    "test:portability": "node --import ./tools/use-host.mjs test/portability.test.mjs",
-    "test:adaptation": "node --import ./tools/use-host.mjs test/adaptation.test.mjs",
+    "test": "node --test test/core.test.mjs test/client.test.mjs test/css.test.mjs",
     "check": "node --check src/index.js && node --check src/scope.js && node --check src/core.js && node --check src/store.js && node --check src/catalog.js && node --check src/mcp.js && node --check src/client.js",
     "test:offline": "node test/offline.test.mjs"
   },
@@ -48,7 +45,7 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.4",
-    "@deepseek-ai/dsh-scope": ">=0.2.0-rc.2"
+    "@deepseek-ai/dsh-scope": ">=v0.2.1-rc.5"
   },
   "dsh": {
     "bundle": {

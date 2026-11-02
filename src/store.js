@@ -39,7 +39,7 @@ export class WorkshopStore {
   async init() {
     await mkdir(this.root, { recursive: true, mode: 0o700 });
     const pending = await readJSON(join(this.root, '.pending.json'));
-    if (pending) await this.publish(pending);
+    if (pending) await this.publish(pending, null);
     const config = await readJSON(join(this.root, 'config.json'));
     if (!config) {
       this.state = { config: { version: 1, presetIds: [BUILTIN_ID], selectedPresetId: BUILTIN_ID, fallbackPresetId: BUILTIN_ID, polling: false, scanInterval: 300, ui: {} }, presets: [newPreset(BUILTIN_ID, BUILTIN_ID, true, process.platform === 'win32' ? 'pwsh' : 'bash')] };
@@ -72,7 +72,7 @@ export class WorkshopStore {
     const next = structuredClone(state);
     next.config.generation = (current?.generation ?? 0) + 1;
     await atomicJSON(join(this.root, '.pending.json'), next);
-    try { await this.publish(next); }
+    try { await this.publish(next, recover || !current ? null : this.state); }
     catch (error) {
       // All callers, including delete/settings, must leave a failed update recoverable.
       if (!recover && current && this.state) {
@@ -83,7 +83,7 @@ export class WorkshopStore {
     }
     this.state = next;
   }
-  async publish(state) {
+  async publish(state, previous = this.state) {
     validateState(state);
     // The journal is replayed at startup if a multi-file update was interrupted.
     for (const preset of state.presets) {
@@ -91,9 +91,11 @@ export class WorkshopStore {
       const dir = join(this.root, 'presets', preset.id);
       await mkdir(dir, { recursive: true, mode: 0o700 });
       const { prompt, tools, ...meta } = preset;
-      await atomicJSON(join(dir, 'preset.json'), meta);
-      await atomicJSON(join(dir, 'prompt.json'), prompt);
-      await atomicJSON(join(dir, 'tools.json'), tools);
+      const old = previous?.presets.find(item => item.id === preset.id);
+      const oldMeta = old && Object.fromEntries(Object.entries(old).filter(([key]) => !['prompt', 'tools'].includes(key)));
+      if (!old || JSON.stringify(meta) !== JSON.stringify(oldMeta)) await atomicJSON(join(dir, 'preset.json'), meta);
+      if (!old || JSON.stringify(prompt) !== JSON.stringify(old.prompt)) await atomicJSON(join(dir, 'prompt.json'), prompt);
+      if (!old || JSON.stringify(tools) !== JSON.stringify(old.tools)) await atomicJSON(join(dir, 'tools.json'), tools);
     }
     await atomicJSON(join(this.root, 'config.json'), state.config);
     for (const dir of await readdir(join(this.root, 'presets'))) {

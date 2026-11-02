@@ -1,16 +1,21 @@
 import { createRequire } from 'node:module';
 import { readdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import yaml from 'js-yaml';
 import { createScope, scopeOf } from '@deepseek-ai/dsh-scope';
 import { BUILTINS, MCP_CLIENT_MODULE, functionSchema, sameToolSchema, fail } from './core.js';
 import { atomicJSON, readJSON } from './store.js';
 import { mountRows } from './scope.js';
 
 const PREFIX = '@deepseek-ai/dsh-tool-';
+const TERMINALS = new Map([
+  ['@deepseek-ai/dsh-tool-bash', 'bash'], ['@deepseek-ai/dsh-tool-bash-persistent', 'bash'],
+  ['@deepseek-ai/dsh-tool-pwsh', 'pwsh'], ['@deepseek-ai/dsh-tool-pwsh-persistent', 'pwsh'],
+]);
 // Unknown packages stay declaration-driven until their owner classifies them as lightweight.
 const LIGHT = new Set([...Object.values(BUILTINS), 'subagent', 'fs-search', 'jobs', 'skill', 'present', 'working-directory']);
 export class ToolCatalog {
-  constructor(ctx, root) { this.ctx = ctx; this.root = root; this.tools = []; this.packages = []; this.mcpServers = []; this.scannedAt = null; }
+  constructor(ctx, root) { this.ctx = ctx; this.root = root; this.tools = []; this.packages = []; this.mcpServers = []; this.hiddenTools = new Set(); this.scannedAt = null; }
   async scan() {
     const templates = new Map();
     const names = new Set(Object.values(BUILTINS).map(name => PREFIX + name));
@@ -31,6 +36,30 @@ export class ToolCatalog {
     }
     const hostRows = [...this.ctx.loader.entries()].filter(entry => !scopeOf(entry.parent.tree.ctx)).map(entry => entry.options);
     walk(hostRows);
+    const declaredTerminals = new Set();
+    const registry = this.ctx.agentPresets;
+    if (registry?.list && registry?.readDocument && registry?.inspectCompositions) {
+      const schema = yaml.DEFAULT_SCHEMA.extend(new yaml.Type('tag:yaml.org,2002:js', { kind: 'scalar', construct: value => ({ __jsExpr: value }) }));
+      const visit = rows => {
+        for (const row of rows ?? []) {
+          if (!row || typeof row !== 'object') continue;
+          const tool = TERMINALS.get(row.name);
+          if (tool) declaredTerminals.add(tool);
+          if (Array.isArray(row.config)) visit(row.config);
+          if (Array.isArray(row.config?.plugins)) visit(row.config.plugins);
+        }
+      };
+      for (const preset of await registry.list()) {
+        if (this.ctx.get?.('presetWorkshop')?.ownsPreset?.(preset.id)) continue;
+        try {
+          const rows = yaml.load((await registry.readDocument(preset.id)).content, { schema });
+          visit(rows);
+        }
+        catch (error) { this.ctx.logger.warn(`Preset Workshop terminal inventory (${preset.id}): ${error.message}`); }
+      }
+      const active = new Set(registry.inspectCompositions().flatMap(composition => composition.modules.map(module => TERMINALS.get(module.moduleName)).filter(Boolean)));
+      this.hiddenTools = new Set([...declaredTerminals].filter(name => !active.has(name)));
+    }
     const bases = new Set([import.meta.url, this.ctx.baseUrl, this.ctx.loader.ctx?.baseUrl].filter(Boolean));
     for (const entry of this.ctx.loader.entries()) if (entry.parent.tree.ctx.baseUrl) bases.add(entry.parent.tree.ctx.baseUrl);
     const roots = new Set();
@@ -47,9 +76,9 @@ export class ToolCatalog {
       catch (error) { this.ctx.logger.warn(`Preset Workshop package scan: ${error.message}`); }
     }
     const known = await readJSON(join(this.root, 'catalog.json'), { tools: [] });
-    const byName = new Map(known.tools.map(tool => [tool.name, { ...tool, available: false }]));
+    const byName = new Map(known.tools.filter(tool => !this.hiddenTools.has(tool.name)).map(tool => [tool.name, { ...tool, available: false }]));
     const packages = [];
-    const orderedNames = [...names].sort(), results = new Array(orderedNames.length);
+    const orderedNames = [...names].filter(name => !this.hiddenTools.has(TERMINALS.get(name))).sort(), results = new Array(orderedNames.length);
     const baseline = this.ctx.systemPrompt?.assemble ? await this.ctx.systemPrompt.assemble() : undefined;
     let cursor = 0;
     const inspect = async name => {
@@ -58,12 +87,6 @@ export class ToolCatalog {
       for (const candidate of candidates) if (typeof candidate.row.disabled === 'boolean') delete candidate.row.disabled;
       const template = candidates[0];
       const row = template.row;
-      // Official shell schemas share the shell service; a successful probe
-      // alone cannot prove that Bash/PowerShell matches the platform executor.
-      const incompatibleShell = process.platform === 'win32' ? /^@deepseek-ai\/dsh-tool-bash(?:-persistent)?$/ : /^@deepseek-ai\/dsh-tool-pwsh(?:-persistent)?$/;
-      if (incompatibleShell.test(name)) {
-        return { name, light, available: false, row, error: 'This shell tool does not match the host platform executor' };
-      }
       try { await this.ctx.loader.root.tree.import(name); }
       catch (error) {
         return { name, light, available: false, row, error: error.message };
@@ -91,10 +114,7 @@ export class ToolCatalog {
     this.syncGlobalTools();
     byName.clear();
     for (const tool of this.tools) byName.set(tool.name, tool);
-    for (const [name, suffix] of Object.entries(BUILTINS)) {
-      if (name === (process.platform === 'win32' ? 'bash' : 'pwsh')) continue;
-      if (!byName.has(name)) byName.set(name, { name, package: PREFIX + suffix, kind: 'builtin', light: true, available: false, sections: ['tool:' + name] });
-    }
+    for (const [name, suffix] of Object.entries(BUILTINS)) if (!this.hiddenTools.has(name) && !byName.has(name)) byName.set(name, { name, package: PREFIX + suffix, kind: 'builtin', light: true, available: false, sections: ['tool:' + name] });
     this.tools = [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
     this.packages = packages;
     this.scannedAt = new Date().toISOString();
@@ -113,9 +133,9 @@ export class ToolCatalog {
     }
     this.mcpConfigs = mcpConfigs;
     this.mcpServers = [...mcpConfigs.values()].map(config => ({ serverName: config.serverName, transport: config.transport, source: 'global' })).sort((a, b) => a.serverName.localeCompare(b.serverName));
-    const byName = new Map(this.tools.filter(tool => tool.kind !== 'thirdparty' && (tool.kind !== 'mcp' || mcpConfigs.has(tool.mcpServer))).map(tool => [tool.name, tool.kind === 'mcp' ? { ...tool, available: false } : tool]));
+    const byName = new Map(this.tools.filter(tool => !this.hiddenTools.has(tool.name) && tool.kind !== 'thirdparty' && (tool.kind !== 'mcp' || mcpConfigs.has(tool.mcpServer))).map(tool => [tool.name, tool.kind === 'mcp' ? { ...tool, available: false } : tool]));
     for (const schema of this.ctx.tools.schemas()) {
-      if (schema.name === 'run_code') continue;
+      if (schema.name === 'run_code' || this.hiddenTools.has(schema.name)) continue;
       const knownTool = byName.get(schema.name);
       const mcp = schema.name.startsWith('mcp__')
         ? this.mcpServers.filter(server => schema.name.startsWith(`mcp__${server.serverName}__`)).sort((a, b) => b.serverName.length - a.serverName.length)[0]

@@ -12,8 +12,18 @@ export const AGENT_SECTION = 'workshop:agent-instructions';
 export const DIRECTORY_AGENT = 'workshop:directory-instructions';
 export const TOOL_GUIDANCE = 'workshop:tool-guidance';
 export const TIME_CONTEXT = 'time-context';
+export const USER_RUNTIME = 'workshop:user-runtime';
+export const USER_DIRECTORY = 'workshop:user-directory';
 export const MCP_CLIENT_MODULE = '@deepseek-ai/dsh-mcp-client';
 export const isLegacyCwdSection = section => section.name === 'deployment:persona-suffix' && /^\s*Your working directory is\s+\{\{\s*cwd\s*\}\}\.?\s*$/.test(section.text);
+// Split the live snapshot at its quoted cwd field; never synthesize either display block.
+export function splitRuntimeContext(snapshot = '') {
+  const text = typeof snapshot === 'string' ? snapshot : '';
+  const match = /^([\s\S]*?Current working directory:\s*"(?:[^"\\]|\\.)*"\.?)\s*([\s\S]*)$/i.exec(text);
+  return match
+    ? { workingDirectory: match[1].trim(), environment: match[2].trim() }
+    : { workingDirectory: '', environment: text.trim() };
+}
 // An explicit per-preset binding overrides a source manager's invocation switch,
 // without changing that manager or the original skill file.
 export const boundSkill = skill => ({ ...skill, invocation: { modelInvocable: true, userInvocable: true } });
@@ -48,8 +58,8 @@ export function validatePreset(input, previous, all = [], roster = [], catalog =
   record(p.prompt.sections, 'prompt.sections');
   for (const [name, section] of Object.entries(p.prompt.sections)) {
     if (PERSONA_SECTIONS.has(name) || name === 'preset-workshop:persona' || name === DIRECTORY_AGENT) fail('managed-section', `prompt.sections.${name}: managed by persona or native directory instructions`);
-    if (section?.custom && (name.startsWith('tool:') || [AGENT_SECTION, TOOL_GUIDANCE, TIME_CONTEXT].includes(name))) fail('managed-section', `prompt.sections.${name}: cannot be a custom section`);
-    if (!name.trim() || name !== name.trim() || name.length > 256 || /[\x00-\x1f\x7f]/.test(name) || !section || typeof section.text !== 'string' || section.text.length > 200000 || !Number.isFinite(section.order) || typeof section.enabled !== 'boolean' || (section.custom !== undefined && typeof section.custom !== 'boolean')) fail('invalid-section', `prompt.sections.${name}: expected a name, text (max 200000 characters), finite order and enabled`);
+    if (section?.custom && (name.startsWith('tool:') || [AGENT_SECTION, TOOL_GUIDANCE, TIME_CONTEXT, USER_RUNTIME, USER_DIRECTORY].includes(name))) fail('managed-section', `prompt.sections.${name}: cannot be a custom section`);
+    if (!name.trim() || name !== name.trim() || name.length > 256 || /[\x00-\x1f\x7f]/.test(name) || !section || typeof section.text !== 'string' || section.text.length > 200000 || !Number.isFinite(section.order) || typeof section.enabled !== 'boolean' || (section.custom !== undefined && typeof section.custom !== 'boolean') || (section.role !== undefined && !['system', 'user'].includes(section.role))) fail('invalid-section', `prompt.sections.${name}: expected a name, text (max 200000 characters), finite order, enabled and optional system/user role`);
   }
   if (!p.tools) fail('invalid-tools', 'tools: required');
   stringList(p.tools.enabled, 'tools.enabled');
@@ -208,7 +218,7 @@ export function transformPrompt(assembly, preset, catalog, definitions = new Map
     result.push({ ...section, text: edit?.text ?? toolOverride?.prompt ?? section.text, order: edit?.order ?? definitions.get(section.name)?.order ?? (index + 1) * 100 });
   }
   for (const [name, section] of Object.entries(preset.prompt.sections)) {
-    if (section.custom && ![AGENT_SECTION, DIRECTORY_AGENT, TOOL_GUIDANCE, TIME_CONTEXT].includes(name) && !knownSections.has(name) && !name.startsWith('tool:') && section.enabled && !sections.some(x => x.name === name)) result.push({ name, text: section.text, order: section.order });
+    if (section.custom && section.role !== 'user' && ![AGENT_SECTION, DIRECTORY_AGENT, TOOL_GUIDANCE, TIME_CONTEXT, USER_RUNTIME].includes(name) && !knownSections.has(name) && !name.startsWith('tool:') && section.enabled && !sections.some(x => x.name === name)) result.push({ name, text: section.text, order: section.order });
   }
   for (const tool of tools) {
     const override = preset.tools.overrides[tool.name];

@@ -1,12 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { newPreset, validatePreset, validateToolJSON, transformPrompt, selectedBinding, TOOL_GUIDANCE } from '../src/core.js';
+import { newPreset, validatePreset, validateToolJSON, transformPrompt, selectedBinding, TOOL_GUIDANCE, splitRuntimeContext } from '../src/core.js';
 import { WorkshopStore, dataRoot, atomicJSON } from '../src/store.js';
 
 const tool = { type: 'function', function: { name: 'read', description: 'read', parameters: { type: 'object', properties: { path: { type: 'string', description: 'path' }, description: { type: 'string' } }, required: ['path'] } } };
+test('runtime snapshot display splits at the actual quoted working directory', () => {
+  const snapshot = 'Current runtime context. This snapshot supersedes earlier runtime-context snapshots. Current working directory: "/Users/g/Documents/deepseek-harness/default-workspace". Current DSH file policy: danger-full-access. Approval prompts are disabled.';
+  const parts = splitRuntimeContext(snapshot);
+  assert.equal(parts.workingDirectory, 'Current runtime context. This snapshot supersedes earlier runtime-context snapshots. Current working directory: "/Users/g/Documents/deepseek-harness/default-workspace".');
+  assert.equal(parts.environment, 'Current DSH file policy: danger-full-access. Approval prompts are disabled.');
+  assert.equal([parts.workingDirectory, parts.environment].filter(Boolean).join(' '), snapshot);
+  assert.deepEqual(splitRuntimeContext('Host context without a directory field.'), { workingDirectory: '', environment: 'Host context without a directory field.' });
+});
 test('preset ids, names and builtin identity stay safe across imports', () => {
   assert.throws(() => validatePreset(newPreset('../escape')));
   assert.throws(() => validatePreset(newPreset('standard'), undefined, [], [{ id: 'standard' }]));
@@ -160,9 +168,14 @@ test('configuration survives restart and serial updates; paths follow DSH_HOME',
   const root = await mkdtemp(join(tmpdir(), 'workshop-store-'));
   try {
     const store = new WorkshopStore(root); await store.init();
+    const promptPath = join(root, 'presets/preset_workshop/prompt.json'), toolsPath = join(root, 'presets/preset_workshop/tools.json');
+    const promptInode = (await stat(promptPath, { bigint: true })).ino, toolsInode = (await stat(toolsPath, { bigint: true })).ino;
+    const metadataOnly = structuredClone(store.state); metadataOnly.config.ui.metadataOnly = true; await store.save(metadataOnly);
+    assert.equal((await stat(promptPath, { bigint: true })).ino, promptInode, 'unchanged prompt files are not rewritten');
+    assert.equal((await stat(toolsPath, { bigint: true })).ino, toolsInode, 'unchanged tool files are not rewritten');
     await Promise.all([1, 2, 3].map(n => store.run(async () => { const next = structuredClone(store.state); next.config.ui['step' + n] = n; await store.save(next); })));
     const reopened = new WorkshopStore(root); await reopened.init();
-    assert.deepEqual(reopened.state.config.ui, { step1: 1, step2: 2, step3: 3 });
+    assert.deepEqual(reopened.state.config.ui, { metadataOnly: true, step1: 1, step2: 2, step3: 3 });
     assert.equal(JSON.parse(await readFile(join(root, 'presets/preset_workshop/prompt.json'))).persona, 'You are a helpful assistant.');
     assert.equal(dataRoot({ DSH_HOME: '/tmp/custom-home' }), '/tmp/custom-home/preset-workshop');
     await store.run(async () => { const next = structuredClone(store.state); next.config.ui.newer = true; await store.save(next); });

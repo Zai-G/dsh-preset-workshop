@@ -1,7 +1,7 @@
 import { createScope, scopeOf } from '@deepseek-ai/dsh-scope';
 import { isDeepStrictEqual } from 'node:util';
 import { validateMcp, MCP_CLIENT_MODULE } from './core.js';
-import { mountRows } from './scope.js';
+import { mountRows, MCP_CONNECT_TIMEOUTS } from './scope.js';
 
 export const inject = ['presetWorkshop', 'loader', 'tools', 'systemPrompt'];
 export function apply(ctx, config) {
@@ -35,9 +35,9 @@ export function apply(ctx, config) {
     // The owner joins transport teardown on unload; preset edits need not wait for stdio close.
     scope = createScope(workshop.ownerCtx, key);
     try {
-      await mountRows(scope.ctx, [{ id: 'connection', name: MCP_CLIENT_MODULE, config: { ...config, failOnStartupError: true } }], 15000);
+      await mountRows(scope.ctx, [{ id: 'connection', name: MCP_CLIENT_MODULE, config: { ...config, failOnStartupError: true } }], MCP_CONNECT_TIMEOUTS[config.transport] ?? 30000);
       status.state = 'ready';
-    } catch (error) { status.state = 'error'; status.error = error.message; }
+    } catch (error) { status.state = error.code === 'mcp-timeout' ? 'timeout' : 'error'; status.error = error.message; }
     if (!stopped) {
       workshop.catalogRevision = (workshop.catalogRevision ?? 0) + 1;
       workshop.scheduleRestrictions();
@@ -55,10 +55,10 @@ export async function probeMcp(ctx, input) {
   const key = {}, scope = createScope(ctx, key);
   let timer;
   try {
-    const startup = mountRows(scope.ctx, [{ id: 'workshop-mcp-probe', name: MCP_CLIENT_MODULE, config: { ...server, failOnStartupError: true, reconnect: { ...server.reconnect, enabled: false } } }]);
-    await Promise.race([startup, new Promise((_, reject) => { timer = setTimeout(() => reject(Error(t('检测超时（15 秒）。', 'Check timed out (15 seconds).'))), 15000); })]);
+    const timeoutMs = MCP_CONNECT_TIMEOUTS[server.transport] ?? 30000;
+    await mountRows(scope.ctx, [{ id: 'workshop-mcp-probe', name: MCP_CLIENT_MODULE, config: { ...server, failOnStartupError: true, reconnect: { ...server.reconnect, enabled: false } } }], timeoutMs);
     const tools = ctx.tools.schemas(key).filter(tool => tool.name.startsWith(`mcp__${server.serverName}__`) && ctx.tools.get(tool.name, key) !== ctx.tools.get(tool.name));
     return { ok: true, count: tools.length, message: t(`连接成功 · 发现 ${tools.length} 个工具。未调用工具，也未保存配置。`, `Connected · ${tools.length} tools found. No tools were called and no configuration was saved.`) };
-  } catch (error) { return { ok: false, message: t('检测失败：', 'Check failed: ') + error.message }; }
+  } catch (error) { return { ok: false, state: error.code === 'mcp-timeout' ? 'timeout' : 'error', message: error.code === 'mcp-timeout' ? t('检测超时：', 'Check timed out: ') + error.message : t('检测失败：', 'Check failed: ') + error.message }; }
   finally { clearTimeout(timer); await scope.dispose(); }
 }
