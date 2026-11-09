@@ -8,7 +8,8 @@ test('native module contributes only its reversible settings slot', async () => 
   let module;
   vm.runInNewContext(source, { window: { __ModuleLoader__: { load(value) { module = value; } } }, structuredClone });
   assert.equal(module.id, 'dsh-preset-workshop');
-  const plugin = module.factory(name => { assert.equal(name, 'react'); return {}; });
+  const react = { createElement(type, props) { return { type, props }; } };
+  const plugin = module.factory(name => { assert.equal(name, 'react'); return react; });
   const registrations = [], disposals = [];
   const ctx = {
     effect(factory) { disposals.push(factory()); },
@@ -16,43 +17,53 @@ test('native module contributes only its reversible settings slot', async () => 
     slots: { inject(name, factory) { disposals.push(factory()); }, register(options, component) { registrations.push({ options, component }); return () => registrations.pop(); } },
   };
   plugin.apply(ctx);
-  assert.deepEqual(registrations.map(row => row.options.name), ['settings.section']);
-  assert.equal(registrations[0].options.id, module.id);
+  assert.deepEqual(registrations.map(row => row.options.name), ['settings.section', 'settings.section.icon']);
+  assert.ok(registrations.every(row => row.options.id === module.id));
+  const icon = registrations[1].component({ size: 18, active: false });
+  assert.equal(icon.type, 'span');
+  assert.equal(icon.props.style.width, 18);
+  assert.equal(icon.props.style.WebkitMaskImage, 'url("/preset-workshop/icon.png")');
   for (const dispose of disposals.reverse()) dispose();
   assert.equal(registrations.length, 0);
 });
 
-test('settings navigation compatibility icon is scoped, language aware and fully reversible', async () => {
+test('settings navigation icon uses the host slot and no DOM observer', async () => {
   const source = await readFile(new URL('../src/client.js', import.meta.url), 'utf8');
-  const marker = 'data-preset-workshop-nav-icon', rows = ['通用设置', '预设工坊', '模型'].map(textContent => ({ textContent, attrs: new Map(), setAttribute(key, value) { this.attrs.set(key, value); }, removeAttribute(key) { this.attrs.delete(key); } }));
-  let module, observer, stylesheet, label = '预设工坊', scheduled = [];
-  const document = {
-    body: {}, head: { append(value) { stylesheet = value; } },
-    createElement() { return { textContent: '', remove() { this.removed = true; } }; },
-    querySelectorAll(selector) { return selector === '[role="dialog"] nav button' ? rows : rows.filter(row => row.attrs.has(marker)); },
-  };
-  class MutationObserver {
-    constructor(callback) { this.callback = callback; observer = this; }
-    observe(_target, options) { this.options = options; }
-    disconnect() { this.disconnected = true; }
-  }
-  vm.runInNewContext(source, { window: { __ModuleLoader__: { load(value) { module = value; } } }, structuredClone, document, MutationObserver, queueMicrotask(callback) { scheduled.push(callback); } });
-  const disposals = [];
-  const ctx = { effect(factory) { disposals.push(factory()); }, locale: { register: () => () => {}, bind: () => () => label }, slots: { inject(_name, factory) { disposals.push(factory()); }, register: () => () => {} } };
-  module.factory(() => ({})).apply(ctx);
-  assert.deepEqual(rows.map(row => row.attrs.has(marker)), [false, true, false]);
-  assert.ok(stylesheet.textContent.includes('background:currentColor') && stylesheet.textContent.includes('[data-preset-workshop-nav-icon]>svg'));
-  assert.equal(observer.options.attributes, undefined);
-  assert.equal(observer.options.characterData, true);
-  label = 'Preset Workshop'; rows[1].textContent = label;
-  observer.callback(); observer.callback(); assert.equal(scheduled.length, 1);
-  scheduled.shift()(); assert.equal(rows[1].attrs.has(marker), true);
-  rows[1].textContent = 'Another plugin'; observer.callback(); scheduled.shift()(); assert.ok(!rows[1].attrs.has(marker));
-  rows[1].textContent = label; observer.callback();
-  for (const dispose of disposals.reverse()) dispose();
-  scheduled.shift()();
-  assert.ok(observer.disconnected && stylesheet.removed);
-  assert.ok(rows.every(row => !row.attrs.has(marker)));
+  assert.match(source, /ctx\.slots\.inject\('settings\.section\.icon'/);
+  assert.match(source, /settings\.section\.icon', id: 'dsh-preset-workshop'/);
+  assert.doesNotMatch(source, /MutationObserver|installNavIcon/);
+});
+
+test('tool source selection derives package mounts from enabled tools', async () => {
+  const source = await readFile(new URL('../src/client.js', import.meta.url), 'utf8');
+  assert.match(source, /function toolCard\(tool, source = ''\)/);
+  assert.match(source, /const cardSource = tool => tool\.package && tool\.package !== canonicalSource\(tool\.name\) \? tool\.package : ''/);
+  assert.match(source, /official\.map\(tool => toolCard\(tool, cardSource\(tool\)\)\)/);
+  // Array.prototype.map would pass the numeric index as `source`, which has no .replace.
+  assert.doesNotMatch(source, /\.map\(toolCard\)/);
+  const start = source.indexOf('function syncToolPackages()');
+  const end = source.indexOf('\n      function mcp()', start);
+  const helper = source.slice(start, end);
+  const draft = { tools: { enabled: ['bash', 'read'], packages: ['stale-package'], sources: { bash: '@deepseek-ai/dsh-tool-bash-persistent', unused: '@deepseek-ai/dsh-tool-old' } } };
+  const packages = new Map([
+    ['@deepseek-ai/dsh-tool-bash-persistent', { name: '@deepseek-ai/dsh-tool-bash-persistent', light: false }],
+    ['@deepseek-ai/dsh-tool-read', { name: '@deepseek-ai/dsh-tool-read', light: true }],
+    ['@deepseek-ai/dsh-tool-read-heavy', { name: '@deepseek-ai/dsh-tool-read-heavy', light: false }],
+  ]);
+  vm.runInNewContext(`${helper}; syncToolPackages();`, {
+    draft,
+    canonicalSource: name => name === 'read' ? '@deepseek-ai/dsh-tool-read-heavy' : '@deepseek-ai/dsh-tool-bash',
+    catalogPackage: name => packages.get(name),
+  });
+  assert.deepEqual(Array.from(draft.tools.packages), ['@deepseek-ai/dsh-tool-bash-persistent', '@deepseek-ai/dsh-tool-read-heavy']);
+  const enabledStart = source.indexOf('function toolEnabled(');
+  const enabledEnd = source.indexOf('\n      function toolCard', enabledStart);
+  const enabledHelper = source.slice(enabledStart, enabledEnd);
+  const selectedDraft = { tools: { enabled: ['bash'], sources: { bash: '@deepseek-ai/dsh-tool-bash-persistent' } } };
+  assert.equal(vm.runInNewContext(`${enabledHelper}; toolEnabled({ name: 'bash', package: '@deepseek-ai/dsh-tool-bash-persistent' }, '@deepseek-ai/dsh-tool-bash-persistent');`, {
+    draft: selectedDraft,
+    canonicalSource: () => '@deepseek-ai/dsh-tool-bash',
+  }), true, 'the selected alternate can render as a checked primary card');
 });
 
 test('served client assets contain their controls, isolate styles and omit offline state', async () => {
@@ -67,20 +78,29 @@ test('served client assets contain their controls, isolate styles and omit offli
   assert.ok(!html.includes('catalog-data') && !html.includes('id="navigation"'));
   assert.ok(js.includes('dsh-preset-workshop:collapse:v1') && !html.includes('skill-ponytail'));
   assert.doesNotMatch(js, /来源插件未公开|Plugin source not exposed/);
-  assert.doesNotMatch(js, /tool-source|tool-origin|工具来源：|Source: /);
+  assert.match(js, /data-tool-source/);
+  assert.match(js, /data-description-source="\$\{esc\(descriptionSource\)\}"/);
+  assert.match(js, /openTool\(button\.dataset\.description, button\.dataset\.descriptionSource \|\| ''\)/);
+  assert.match(js, /if \(!selected\)[\s\S]*dialog\(t\('工具描述', 'Tool description'\)[\s\S]*dialog-save'\)\.hidden = true/);
+  assert.match(js, /return selected \? \{ \.\.\.tool, \.\.\.selected, alternates: selected\.alternates \|\| tool\.alternates \} : tool/);
+  assert.match(html, /id="same-name-group"/);
+  assert.match(html, /class="tools-grid bounded-list" id="same-name-tools"/);
+  assert.doesNotMatch(js, /tool-origin|工具来源：|Source: /);
   const userStart = js.indexOf('const user = [', js.indexOf('function sections()'));
   const userEnd = js.indexOf("$('section-list').innerHTML", userStart);
   const userAssembly = js.slice(userStart, userEnd);
-  for (const part of ["name: 'workshop:user-runtime'", "name: 'workshop:user-skill'", "section.name === 'time-context'", "name: AGENT", "section.role === 'user'"]) assert.ok(userAssembly.includes(part), `missing User section ${part}`);
+  for (const part of ["name: 'workshop:user-runtime'", "name: 'workshop:user-skill'", "section.name === 'time-context'", "name: AGENT", "name: USER_DIRECTORY", "name: USER_CWD", "section.role === 'user'"]) assert.ok(userAssembly.includes(part), `missing User section ${part}`);
   assert.doesNotMatch(userAssembly, /\.sort\(\(a, b\) => a\.order - b\.order/);
   assert.doesNotMatch(userAssembly, /reorderable:\s*true/);
-  assert.match(userAssembly, /name: 'workshop:user-cwd', text: preview\.runtimeContextWorkingDirectory/);
+  assert.match(userAssembly, /name: USER_CWD, text: preview\.runtimeContextWorkingDirectory, enabled: saved\(USER_CWD\)\.enabled !== false, toggleable: true, editable: false/);
   assert.match(userAssembly, /name: 'workshop:user-runtime'[\s\S]*editable: false, reorderable: false/);
   assert.match(userAssembly, /name: 'workshop:user-skill'[\s\S]*editable: false, reorderable: false/);
   assert.doesNotMatch(userAssembly, /name: 'workshop:user-skill'[^\n]*toggleable/);
-  assert.match(js, /id === 'workshop:user-cwd'[\s\S]*preview\?\.runtimeContextWorkingDirectory/);
+  assert.match(js, /id === USER_CWD[\s\S]*preview\?\.runtimeContextWorkingDirectory/);
   assert.match(js, /const workingDirectory = preview\.runtimeContextWorkingDirectory \|\| ''/);
   assert.match(js, /const environmentText = preview\.runtimeContextEnvironment \|\| ''/);
+  assert.match(js, /fragment\('AGENTS', agentsText, 'agent-fragment'\)/);
+  assert.match(js, /draft\.prompt\.sections\[USER_CWD\]\?\.enabled === false \? '' : workingDirectory/);
   assert.match(js, /id === 'workshop:user-runtime'[\s\S]*preview\?\.runtimeContextEnvironmentSource/);
   const fitStart = js.indexOf('function fitToolLists()');
   const fitEnd = js.indexOf('\n      function tools()', fitStart);
@@ -88,7 +108,7 @@ test('served client assets contain their controls, isolate styles and omit offli
   assert.ok(fitLists.indexOf("if (cards.length <= 8") < fitLists.indexOf("list.style.maxHeight = 'none'"), 'capped lists keep their height while measuring cards');
   assert.match(js, /if \(\$\('official-tools'\)\.innerHTML !== officialMarkup\) \$\('official-tools'\)\.innerHTML = officialMarkup/);
   assert.match(js, /if \(\$\('thirdparty-tools'\)\.innerHTML !== thirdMarkup\) \$\('thirdparty-tools'\)\.innerHTML = thirdMarkup/);
-  assert.match(js, /enabled \? preview\.agentInstructions\.renderedText/);
+  assert.match(js, /preview\.agentInstructions\?\.requestText/);
   assert.match(js, /dialog\(title, name, edit \?/);
   assert.match(js, /globalAgentDescription/);
   assert.match(js, /directoryAgentDescription/);
@@ -127,10 +147,10 @@ test('served client assets contain their controls, isolate styles and omit offli
   const metadata = JSON.parse(pkg);
   assert.equal(metadata.exports['./client'], './src/client.js');
   assert.equal(metadata.exports['.'], './src/index.js');
-  assert.equal(metadata.peerDependencies['@deepseek-ai/dsh-scope'], '>=v0.2.1-rc.5');
+  assert.equal(metadata.peerDependencies['@deepseek-ai/dsh-scope'], '>=v0.2.2-rc.1');
   assert.ok(metadata.files.includes('src'));
   assert.equal(metadata.icon, 'assets/color.png');
-  assert.equal(metadata.version, '0.3.0');
+  assert.equal(metadata.version, '0.3.1');
   assert.equal(metadata.exports['./package.json'], './package.json');
   assert.ok((await stat(new URL('../assets/color.png', import.meta.url))).size <= 256 * 1024);
   assert.ok(html.includes('draggable="false"'));
@@ -143,7 +163,8 @@ test('served client assets contain their controls, isolate styles and omit offli
   assert.equal(styles('.mcp-preview-entry.has-reveal')['grid-template-columns'], 'minmax(90px, .42fr) minmax(0, 1fr) 30px');
   assert.equal(styles('.mcp-preview-entry.has-reveal .icon-button').width, '30px');
   for (const selector of ['.bounded-list', '#skill-list', '.skill-body', '.skill-description-card p']) assert.ok(styles(selector)['max-height'] && styles(selector).overflow === 'auto');
-  assert.ok(js.includes('width:18px;height:18px'));
+  assert.match(js, /settings\.section\.icon'[\s\S]*\(\{ size \}\)/);
+  assert.match(js, /id === USER_CWD && el\.checked[\s\S]*base\.prompt\.sections\[id\][\s\S]*delete draft\.prompt\.sections\[id\]/);
   assert.ok(!js.includes('<code class=\"skill-path\">'));
   assert.ok(html.indexOf('class=\"id-field\"') < html.indexOf('class=\"preset-create-row actions\"'));
   assert.ok(html.includes('id=\"add-section\"'));
@@ -156,6 +177,7 @@ test('served client assets contain their controls, isolate styles and omit offli
   assert.match(html, /id="preview-dialog" class="preview-dialog"/);
   for (const key of ['official-tools', 'thirdparty-tools']) assert.match(html, new RegExp(`data-ui-collapse="${key}" open`));
   assert.ok(css.includes('overscroll-behavior:auto'));
+  assert.match(css, /\.prompt-card-head>\.tooltip-wrap,\.prompt-card-head \.persona-variable-hint\s*\{ margin-left:-9px \}/);
   assert.doesNotMatch(css, /dialog\[open\]:has\([^{}]*\)\s*\{[^}]*height\s*:/s);
   assert.match(css, /\.dialog-body\s*\{[^}]*max-height:calc\(100dvh - 190px\)/s);
   assert.match(css, /\.json-editor\s*\{[^}]*height:min\(370px,45vh\)/s);

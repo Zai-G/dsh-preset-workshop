@@ -3,17 +3,37 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { newPreset, validatePreset, validateToolJSON, transformPrompt, selectedBinding, TOOL_GUIDANCE, splitRuntimeContext } from '../src/core.js';
+import { newPreset, validatePreset, validateToolJSON, transformPrompt, selectedBinding, TOOL_GUIDANCE, USER_CWD, splitRuntimeContext } from '../src/core.js';
+import { ToolCatalog } from '../src/catalog.js';
 import { WorkshopStore, dataRoot, atomicJSON } from '../src/store.js';
 
 const tool = { type: 'function', function: { name: 'read', description: 'read', parameters: { type: 'object', properties: { path: { type: 'string', description: 'path' }, description: { type: 'string' } }, required: ['path'] } } };
 test('runtime snapshot display splits at the actual quoted working directory', () => {
   const snapshot = 'Current runtime context. This snapshot supersedes earlier runtime-context snapshots. Current working directory: "/Users/g/Documents/deepseek-harness/default-workspace". Current DSH file policy: danger-full-access. Approval prompts are disabled.';
   const parts = splitRuntimeContext(snapshot);
-  assert.equal(parts.workingDirectory, 'Current runtime context. This snapshot supersedes earlier runtime-context snapshots. Current working directory: "/Users/g/Documents/deepseek-harness/default-workspace".');
+  assert.equal(parts.workingDirectory, 'Current working directory: "/Users/g/Documents/deepseek-harness/default-workspace".');
   assert.equal(parts.environment, 'Current DSH file policy: danger-full-access. Approval prompts are disabled.');
-  assert.equal([parts.workingDirectory, parts.environment].filter(Boolean).join(' '), snapshot);
+  assert.ok(!parts.environment.includes('Current runtime context.'));
   assert.deepEqual(splitRuntimeContext('Host context without a directory field.'), { workingDirectory: '', environment: 'Host context without a directory field.' });
+  assert.deepEqual(splitRuntimeContext('Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nCurrent DSH file policy: read-only.'), { workingDirectory: '', environment: 'Current DSH file policy: read-only.' });
+});
+test('same-name candidates with identical schemas are omitted', () => {
+  const catalog = Object.create(ToolCatalog.prototype);
+  const schema = { type: 'function', function: { name: 'bash', description: 'same', parameters: { type: 'object' } } };
+  catalog.packages = [
+    { name: '@deepseek-ai/dsh-tool-bash', available: true, tools: ['bash'], entries: [{ name: 'bash', schema }] },
+    { name: '@deepseek-ai/dsh-tool-bash-persistent', available: true, tools: ['bash'], entries: [{ name: 'bash', schema: structuredClone(schema) }] },
+    { name: '@deepseek-ai/dsh-tool-bash-custom', available: true, tools: ['bash'], entries: [{ name: 'bash', schema: { ...schema, function: { ...schema.function, description: 'custom' } } }] },
+  ];
+  const result = catalog.withAlternates({ name: 'bash', package: '@deepseek-ai/dsh-tool-bash', schema });
+  assert.deepEqual(result.alternates.map(tool => tool.source), ['@deepseek-ai/dsh-tool-bash-custom']);
+});
+test('selected tool sources do not depend on a separate package toggle', () => {
+  const p = newPreset('source');
+  p.tools.enabled = ['bash'];
+  p.tools.sources = { bash: '@deepseek-ai/dsh-tool-bash-persistent' };
+  const catalog = [{ name: 'bash', package: '@deepseek-ai/dsh-tool-bash-persistent' }];
+  assert.equal(validatePreset(p, p, [], [], catalog).tools.sources.bash, '@deepseek-ai/dsh-tool-bash-persistent');
 });
 test('preset ids, names and builtin identity stay safe across imports', () => {
   assert.throws(() => validatePreset(newPreset('../escape')));
@@ -22,6 +42,13 @@ test('preset ids, names and builtin identity stay safe across imports', () => {
   assert.throws(() => validatePreset({ ...p, id: 'two' }, p));
   assert.throws(() => validatePreset(newPreset('two', 'A'), undefined, [p]));
   assert.equal(validatePreset({ ...p, builtin: false, enabled: false }, p).enabled, true);
+});
+test('working-directory visibility is a managed per-preset switch', () => {
+  const p = newPreset('cwd');
+  p.prompt.sections[USER_CWD] = { text: '', order: 0, enabled: false };
+  assert.equal(validatePreset(p, p).prompt.sections[USER_CWD].enabled, false);
+  p.prompt.sections[USER_CWD].custom = true;
+  assert.throws(() => validatePreset(p, p), error => error.code === 'managed-section');
 });
 test('MCP server configurations validate transport fields and stay isolated by name', () => {
   const p = newPreset('mcp');
@@ -43,7 +70,7 @@ test('disabled MCP services leave neither instructions nor resource names after 
   p.mcp = [{ serverName: 'custom', enabled: false }];
   const resource = { name: 'mcp-resource-servers', text: 'Servers: ["environment","custom","keep"]', order: 3100, enabled: true };
   p.prompt.sections[resource.name] = resource;
-  const assembly = { sections: [resource, { name: 'mcp:environment', text: 'ENV' }, { name: 'mcp:custom', text: 'CUSTOM' }, { name: 'mcp:keep', text: 'KEEP' }, { name: 'mcp:empty', text: '' }], tools: [] };
+  const assembly = { sections: [resource, { name: 'mcp:environment', text: 'ENV' }, { name: 'mcp:custom', text: 'CUSTOM' }, { name: 'mcp:keep', text: 'KEEP' }, { name: 'mcp:empty', text: '' }, { name: 'mcp:whitespace', text: '  \n\t ' }], tools: [] };
   let sections = transformPrompt(assembly, p, []).sections;
   assert.equal(sections.find(s => s.name === resource.name).text, 'Servers: ["keep"]');
   assert.deepEqual(sections.filter(s => s.name.startsWith('mcp:')).map(s => s.name), ['mcp:keep']);
@@ -79,13 +106,12 @@ test('tool JSON only changes descriptions, including a parameter named descripti
   changedDocumentation.function.parameters.properties.path.description = 'New schema documentation';
   assert.equal(validateToolJSON(changedDocumentation, 'read', literal), changedDocumentation);
 });
-test('tool masks remove schemas and corresponding prompt sections independently', () => {
+test('tool masks filter prompt sections without changing provider-owned schemas', () => {
   const p = newPreset('one'); p.tools.enabled = ['read'];
   p.tools.overrides.read = { schema: { ...tool, function: { ...tool.function, description: 'custom' } }, prompt: 'custom read instructions' };
-  const assembly = { sections: [{ name: 'harness:identity', text: 'host' }, { name: 'tool:read', text: 'read' }, { name: 'tool:edit', text: 'edit' }, { name: 'policy', text: 'extra' }], contexts: [], variables: {}, tools: [tool.function, { ...tool.function, name: 'edit' }] };
+  const assembly = { sections: [{ name: 'harness:identity', text: 'host' }, { name: 'tool:read', text: 'read' }, { name: 'tool:edit', text: 'edit' }, { name: 'policy', text: 'extra' }], contexts: [], variables: {} };
   const transformed = transformPrompt(assembly, p, [{ name: 'read', sections: ['tool:read'] }, { name: 'edit', sections: ['tool:edit'] }]);
-  assert.deepEqual(transformed.tools.map(t => t.name), ['read']);
-  assert.equal(transformed.tools[0].description, 'custom');
+  assert.equal(transformed.tools, undefined);
   assert.equal(transformed.sections.find(s => s.name === 'tool:read').text, 'custom read instructions');
   assert.ok(!transformed.sections.some(s => ['harness:identity', 'tool:edit'].includes(s.name)));
   assert.ok(transformed.sections.some(s => s.name === 'policy'));
@@ -121,7 +147,7 @@ test('custom System sections validate trust boundaries and survive normal policy
 test('only the latest preset selection determines a session binding', () => {
   assert.equal(selectedBinding({ agentPreset: 'one' }, [{ type: 'agent-preset/selected', data: { agentPreset: 'two' } }]), 'two');
 });
-test('shared and absent tool sections support independent description and prompt overrides', () => {
+test('shared and absent tool sections support prompt overrides independently of tool schemas', () => {
   const p = newPreset('one');
   p.tools.enabled = ['job_list', 'job_output', 'todo_write'];
   const schema = name => ({ type: 'function', function: { ...structuredClone(tool.function), name } });
@@ -136,14 +162,14 @@ test('shared and absent tool sections support independent description and prompt
   const text = output.sections.map(s => s.text).join('\n');
   assert.ok(text.includes('CUSTOM JOB OUTPUT') && text.includes('Shared job instructions'));
   for (const description of ['CUSTOM JOB LIST', 'CUSTOM TODO', 'CUSTOM UNION DESCRIPTION']) assert.ok(!text.includes(description), 'schema descriptions must not replace native instructions');
-  assert.equal(output.tools.find(t => t.name === 'job_list').description, 'CUSTOM JOB LIST');
-  assert.equal(output.tools.find(t => t.name === 'todo_write').parameters.properties.path.anyOf[0].description, 'CUSTOM UNION DESCRIPTION');
+  assert.equal(output.tools.find(t => t.name === 'job_list').description, assembly.tools.find(t => t.name === 'job_list').description);
+  assert.equal(output.tools.find(t => t.name === 'todo_write').parameters.properties.path.anyOf[0].description, assembly.tools.find(t => t.name === 'todo_write').parameters.properties.path.anyOf[0].description);
   p.tools.overrides.job_output.promptEnabled = false;
   const hidden = transformPrompt(assembly, p, catalog);
   assert.ok(hidden.sections.some(s => s.text.includes('Shared job instructions')));
   assert.ok(!hidden.sections.some(s => s.text.includes('CUSTOM JOB OUTPUT')));
 });
-test('editable tool guidance remains dynamic, moves as a group and can be disabled independently of schemas', () => {
+test('editable tool guidance remains dynamic and can be disabled independently of provider schemas', () => {
   const p = newPreset('guidance');
   p.tools.enabled = ['read', 'write'];
   p.prompt.sections = {
@@ -159,7 +185,7 @@ test('editable tool guidance remains dynamic, moves as a group and can be disabl
   assert.deepEqual(transformPrompt(assembly, p, catalog, definitions).sections.map(section => section.text), ['You are a helpful assistant.', 'WRITE', 'AFTER']);
   p.prompt.sections[TOOL_GUIDANCE].enabled = false;
   const disabled = transformPrompt(assembly, p, catalog, definitions);
-  assert.deepEqual(disabled.tools.map(schema => schema.name), ['write']);
+  assert.deepEqual(disabled.tools.map(schema => schema.name), ['read', 'write']);
   assert.ok(!disabled.sections.some(section => section.name.startsWith('tool:')));
   p.prompt.sections[TOOL_GUIDANCE] = { text: '', order: 800, enabled: true };
   assert.deepEqual(transformPrompt(assembly, p, catalog, definitions).sections.map(section => section.text), ['You are a helpful assistant.', 'AFTER', 'WRITE']);

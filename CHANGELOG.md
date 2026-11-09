@@ -2,6 +2,55 @@
 
 本文件记录已发布版本。每次发布会在 [GitHub Releases](https://github.com/Zai-G/dsh-preset-workshop/releases) 中列出变化、兼容性和升级注意事项。
 
+## v0.3.1 · 2026-11-09
+
+适配 DSH `0.2.2-rc.1`，最低支持版本同步提升至该版本：AGENTS 指令改由宿主官方渲染器统一产出并合并为单条 User 消息，官方工具改为逐项清单加按需挂载来源，工作目录成为预设级开关；同时修复 schema 覆盖绕过来源准入、旧包级选择迁移、同名来源切换后存量会话状态错配等问题。
+
+### 新功能
+
+- **工作目录预设级开关**：新增受管段 `workshop:user-cwd`（`src/core.js:17`），默认开启、只读、不可排序，重置预设即恢复默认。关闭时 `src/scope.js:16-22` 在该预设的上下文层为 `working-directory:current` 包一层求值器，命中关闭状态返回空串；`src/scope.js:138-141` 同时从实际请求的 contexts 中移除该条。只抑制本预设的注入，不注销宿主 `workingDirectory` 服务，也不影响其他预设；重新开启后按当前会话目录取值。扫描计数同步按开关口径统计（`src/index.js:554`），仅启用环境时不再把工作目录算作有效提示词段。
+- **官方工具逐项呈现**：扫描结果改为「工具级清单 + 隔离探测」两级：只有探测出 `entries` 的包才进入候选，`executor-native`、`executor-ptc`、`executor-testkit` 等非工具包从扫描中排除（`src/catalog.js:13` `NON_TOOL_PACKAGES`），探测失败、空包不再显示，也不再触发空工具预览失败。启用重型工具时，`packages` 仅由已启用工具推导并在当前预设内挂载所需来源；工具全部关闭时仍保留工具级列表，不回退为包级开关。
+
+### 变更与优化
+
+- **AGENTS 走官方渲染器**：预览与真实请求统一取 `instructions.renderAgentInstructions(files, { maxBytes }).text`；`src/index.js:504-506` 把全局文件与 `discoverBaselineInstructionFiles` 得到的目录文件合并渲染为 `requestText`，作为**单条** User 消息发出，取代 0.3.0 中由插件分头拼接的 `preset-workshop-directory-instructions` 消息。User 注入顺序改为 AGENTS(-2) → 工作目录(-1) → 环境(0) → 技能目录(100) → 时间与时区(200)（`src/scope.js:125`），预览中 AGENTS 段位于工作目录之上。
+- **预览正文去包装**：新增 `plainInstructionContent()`，从宿主渲染结果中剥掉 `<system-reminder>` 外壳与 `Instructions from: <path>` 头，仅对已知 `displayPath` 生效，正文里普通的 `Instructions from:` 文本不再被误删；预览不再重复展示宿主生成的包装。
+- **同名工具来源**：`catalog.withAlternates()` 为单工具包生成最多两个候选，按 `sameToolSchema` 过滤 schema 完全一致的冗余候选；`tools.sources[name]` 记录选中来源，主卡显示 `source-note` 并可直接关闭，候选卡只读，`openTool(name, source)` 仅展示其 schema；同名区与官方工具区统一为两列布局。
+- **工具来源推导与清理**：保存时由 `tools.enabled` 与 `tools.sources` 反推 `tools.packages`（`src/index.js:890-904`），关闭工具即从 `sources` 删除条目，不再残留悬空来源；`syncToolOverrides()` 对未启用、无来源或无覆盖的工具直接 `dispose()` 其注册。
+- **图标与主题**：设置页导航图标改为注册宿主原生 `settings.section.icon` 槽位（`src/client.js:811`，`mask-image` 指向 `/preset-workshop/icon.png` 并跟随 `currentColor`），不再自绘；人设与宿主标题旁的提示图标以 `align-self:center` 与负外边距贴齐标题；深色模式开关轨道改用 `color-mix` 提升对比。
+- **投影接口迁移**：`sessionProjections` 由读取已弃用的 `stateOf` 改为包装 `register(definition)`，返回的 handle 同时提供 `stateOf` 与 `readerFor`（`src/scope.js:27-45`）；`apply` 改为 `async` 并等待 `timeModule.apply` 完成注册。
+- **扫描口径**：空 `mcp:<name>` 段不再计入提示词段数，自定义 User 段按启用且有正文才计数（`src/index.js:550-558`）。
+
+### 修复
+
+**宿主兼容（`0.2.2-rc.1`）**
+
+- 预览会话改由 `Session.create(id, undefined, { version: sessionFormatVersion, id, createdAt, cwd, isSeeded: false, agentPreset })` 建立，`sessionFormatVersion` 取自 `@deepseek-ai/dsh-session`，修复新版会话格式下预览构造失败。
+- 时间上下文预览按新签名传入 `{ agent: { session }, turn, step, signal }`，并从包装后的 `register` 句柄取状态，修复预览读数为空。
+- 提示词装配适配 context 层：`transformPrompt(assembly, preset, catalog, definitions, admittedTools)` 新增准入集合，未准入的 `tool:` 段与工具不再进入系统提示词与工具表。
+
+**工具 schema 与来源**
+
+- 工具覆盖注册时保留宿主来源的激活条件：`toolActivation()` 从 `ctx.tools.layers.chainLayers(scope)` 读取 `registration.when`，`toolSourceAdmitted()` 先逐层校验 `admits(name)` 再求值 `when`（`src/index.js:315-322`），覆盖后的 schema 不再绕过来源、模型与 Agent 身份准入。
+- 修复关闭工具后自定义 schema 仍进入请求的问题：`syncToolOverrides()` 以 `enabled` 为准注销覆盖注册。
+- 修复切换同名来源后继承旧 schema 覆盖的问题：保存时若来源改变且覆盖与上一版逐字相等，丢弃该覆盖，只保留独立的 `prompt` / `promptEnabled`（`src/index.js:908-919`）。
+- 修复 `bash` 与 `bash-persistent` 等同名终端来源在逐项选择后状态失配：终端名归一化后按来源区分，隐藏的终端包不再进入清单（`src/catalog.js:15,83`），勾选状态以 `sources[name] || canonicalSource(name)` 判定，切换时同步写入或清理 `sources` 与 `packages`。
+- 旧包级选择迁移：`migrateLegacyPackageSelection()` 把包内工具展开为逐项选择，启动时 `migrateStoredToolSelections()` 对存量预设逐个校验并写回（变更则 `revision + 1`，失败记录 `tool-migration-failed` 警告而不阻断加载）。
+- 修复同名来源切换后存量会话未提示待迁移：`toolSourceMatches()` 改为比较选中来源包与实际挂载包，并按 `sameToolSchema` 核对 schema；`pendingTools()` 据此列出需要恢复会话的能力（`src/index.js:225-245,292`）。
+
+**AGENTS 与工作目录**
+
+- 修复目录 AGENTS 重新开启后丢失宿主消息包装：合并路径统一由官方渲染器产出，不再手工拼接提醒文本。
+- 修复原生 AGENTS 非基线增量更新被合并逻辑误删：过滤 `agent-instructions` 消息时只移除 `baseline === true` 的替换基线，保留宿主追加的增量消息（`src/scope.js:97-99`）。
+- 修复仅启用环境时仍注入工作目录的问题（`src/scope.js:138-141`）；关闭后再次开启工作目录，按当前目录重新求值。
+
+### 兼容性与验证
+
+- peer `@deepseek-ai/dsh-scope` 提升为 `>=v0.2.2-rc.1`，仍不设上限；低于该版本的宿主不再满足声明。声明门槛同时体现在 README 的版本徽章。
+- 在 DSH Desktop `0.2.2-rc.1` 解包运行时上通过 `npm run check`、`npm test`（28 项）、`test:host`、`test:portability`、`test:adaptation`、`test:offline`。
+- `tools/offline-mock.js` 对齐新版装配：System 层只保留工具使用指引与 MCP 资源服务器两行，工作目录改由 `transformPrompt` 的准入集合处理，并按同一方法生成 `estimatedTokenRange`。
+- 未验项：供应商与远端 MCP、冷盘计时、Windows / Linux 实机，以及本版的真实桌面端交互验收。
+
 ## v0.3.0 · 2026-11-02
 
 设置页整体重构：配置区改为前端分段切换与预览摘要卡，预览与编辑弹窗同构，User 上下文按固定顺序分层；宿主门槛提升至 DSH `v0.2.1-rc.5`。本节覆盖 2026-10-25 以来的累计变更。

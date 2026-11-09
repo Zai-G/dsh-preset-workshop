@@ -14,15 +14,17 @@ export const TOOL_GUIDANCE = 'workshop:tool-guidance';
 export const TIME_CONTEXT = 'time-context';
 export const USER_RUNTIME = 'workshop:user-runtime';
 export const USER_DIRECTORY = 'workshop:user-directory';
+export const USER_CWD = 'workshop:user-cwd';
 export const MCP_CLIENT_MODULE = '@deepseek-ai/dsh-mcp-client';
 export const isLegacyCwdSection = section => section.name === 'deployment:persona-suffix' && /^\s*Your working directory is\s+\{\{\s*cwd\s*\}\}\.?\s*$/.test(section.text);
 // Split the live snapshot at its quoted cwd field; never synthesize either display block.
 export function splitRuntimeContext(snapshot = '') {
-  const text = typeof snapshot === 'string' ? snapshot : '';
-  const match = /^([\s\S]*?Current working directory:\s*"(?:[^"\\]|\\.)*"\.?)\s*([\s\S]*)$/i.exec(text);
-  return match
-    ? { workingDirectory: match[1].trim(), environment: match[2].trim() }
-    : { workingDirectory: '', environment: text.trim() };
+  let text = typeof snapshot === 'string' ? snapshot.trim() : '';
+  text = text.replace(/^Current runtime context\. This snapshot supersedes earlier runtime-context snapshots\.\s*/i, '').trim();
+  const match = /(?:^|\n\n)(Current working directory:\s*"(?:[^"\\]|\\.)*"\.?)(?=\s|$)/i.exec(text);
+  if (!match) return { workingDirectory: '', environment: text };
+  const environment = text.slice(0, match.index) + text.slice(match.index + match[0].length);
+  return { workingDirectory: match[1].trim(), environment: environment.trim() };
 }
 // An explicit per-preset binding overrides a source manager's invocation switch,
 // without changing that manager or the original skill file.
@@ -35,7 +37,7 @@ export function newPreset(id, name = id, builtin = false, shell = 'bash') {
   return {
     id, name, description: '', enabled: true, builtin, revision: 1,
     prompt: { persona: 'You are a helpful assistant.', sections: {} },
-    tools: { enabled: [shell, ...Object.keys(BUILTINS).filter(name => !['bash', 'pwsh'].includes(name))], packages: [], overrides: {} },
+    tools: { enabled: [shell, ...Object.keys(BUILTINS).filter(name => !['bash', 'pwsh'].includes(name))], packages: [], overrides: {}, sources: {} },
     skills: [],
     mcp: [],
     mcpEnabled: {},
@@ -58,12 +60,19 @@ export function validatePreset(input, previous, all = [], roster = [], catalog =
   record(p.prompt.sections, 'prompt.sections');
   for (const [name, section] of Object.entries(p.prompt.sections)) {
     if (PERSONA_SECTIONS.has(name) || name === 'preset-workshop:persona' || name === DIRECTORY_AGENT) fail('managed-section', `prompt.sections.${name}: managed by persona or native directory instructions`);
-    if (section?.custom && (name.startsWith('tool:') || [AGENT_SECTION, TOOL_GUIDANCE, TIME_CONTEXT, USER_RUNTIME, USER_DIRECTORY].includes(name))) fail('managed-section', `prompt.sections.${name}: cannot be a custom section`);
+    if (section?.custom && (name.startsWith('tool:') || [AGENT_SECTION, TOOL_GUIDANCE, TIME_CONTEXT, USER_RUNTIME, USER_DIRECTORY, USER_CWD].includes(name))) fail('managed-section', `prompt.sections.${name}: cannot be a custom section`);
     if (!name.trim() || name !== name.trim() || name.length > 256 || /[\x00-\x1f\x7f]/.test(name) || !section || typeof section.text !== 'string' || section.text.length > 200000 || !Number.isFinite(section.order) || typeof section.enabled !== 'boolean' || (section.custom !== undefined && typeof section.custom !== 'boolean') || (section.role !== undefined && !['system', 'user'].includes(section.role))) fail('invalid-section', `prompt.sections.${name}: expected a name, text (max 200000 characters), finite order, enabled and optional system/user role`);
   }
   if (!p.tools) fail('invalid-tools', 'tools: required');
   stringList(p.tools.enabled, 'tools.enabled');
   stringList(p.tools.packages, 'tools.packages');
+  p.tools.sources ??= {};
+  record(p.tools.sources, 'tools.sources');
+  for (const [name, source] of Object.entries(p.tools.sources)) if (!/^[A-Za-z0-9_:-]{1,256}$/.test(name) || typeof source !== 'string' || !/^@deepseek-ai\/dsh-tool-[a-z0-9-]+(?:\/[a-z0-9-]+)*$/.test(source)) fail('invalid-tool-source', `tools.sources.${name}: expected a tool name and official package source`);
+  for (const [name, source] of Object.entries(p.tools.sources)) {
+    const provider = catalog.find(tool => tool.name === name);
+    if (catalog.length && provider?.package !== source) fail('invalid-tool-source', `tools.sources.${name}: source does not provide this discovered tool`);
+  }
   if (p.tools.packages.some(name => !/^@deepseek-ai\/dsh-tool-[a-z0-9-]+(?:\/[a-z0-9-]+)*$/.test(name))) fail('invalid-package', 'tools.packages: expected discovered official tool packages');
   if (p.tools.enabled.includes('run_code')) fail('reserved-tool', 'run_code is a reserved transport');
   record(p.tools.overrides, 'tools.overrides');
@@ -182,30 +191,25 @@ export function filterMcpSections(sections, preset) {
     return visible.length ? [{ ...section, text: section.text.slice(0, start) + JSON.stringify(visible) + section.text.slice(end + 1) }] : [];
   });
 }
-export function transformPrompt(assembly, preset, catalog, definitions = new Map()) {
+export function transformPrompt(assembly, preset, catalog, definitions = new Map(), admittedTools) {
   const enabled = new Set(preset.tools.enabled);
+  const selected = name => enabled.has(name) && (!admittedTools || admittedTools.has(name));
   const movedCwd = assembly.contexts?.some(context => context.name === 'working-directory:current');
   const sections = assembly.sections.filter(x => !PERSONA_SECTIONS.has(x.name) && x.name !== AGENT_SECTION);
   const activeSections = new Set();
   const knownSections = new Set();
   for (const tool of catalog) for (const name of tool.sections ?? []) {
     knownSections.add(name);
-    if (enabled.has(tool.name)) activeSections.add(name);
+    if (selected(tool.name)) activeSections.add(name);
   }
-  const tools = assembly.tools.filter(x => x.name === 'run_code' || enabled.has(x.name)).map(tool => {
-    const override = preset.tools.overrides[tool.name]?.schema;
-    if (!override) return tool;
-    validateToolJSON(override, tool.name, functionSchema(tool));
-    return { ...tool, ...structuredClone(override.function) };
-  });
   const result = [{ name: 'preset-workshop:persona', text: preset.prompt.persona, order: -1000 }];
   for (const [index, section] of sections.entries()) {
     const toolName = section.name.startsWith('tool:') ? section.name.slice(5) : undefined;
     const edit = preset.prompt.sections[section.name];
     if (!section.text?.trim() && !toolName && !(section.name === 'deployment:persona-suffix' && edit?.text.trim())) continue;
     if (knownSections.has(section.name) && !activeSections.has(section.name)) continue;
-    if (toolName && !knownSections.has(section.name) && !enabled.has(toolName)) continue;
-    const candidates = catalog.filter(tool => enabled.has(tool.name) && (tool.sections ?? []).includes(section.name));
+    if (toolName && !knownSections.has(section.name) && !selected(toolName)) continue;
+    const candidates = catalog.filter(tool => selected(tool.name) && (tool.sections ?? []).includes(section.name));
     const toolOverride = preset.tools.overrides[toolName];
     if (toolOverride?.promptEnabled === false) continue;
     // A shared section remains only while an enabled tool still uses its native text.
@@ -220,7 +224,7 @@ export function transformPrompt(assembly, preset, catalog, definitions = new Map
   for (const [name, section] of Object.entries(preset.prompt.sections)) {
     if (section.custom && section.role !== 'user' && ![AGENT_SECTION, DIRECTORY_AGENT, TOOL_GUIDANCE, TIME_CONTEXT, USER_RUNTIME].includes(name) && !knownSections.has(name) && !name.startsWith('tool:') && section.enabled && !sections.some(x => x.name === name)) result.push({ name, text: section.text, order: section.order });
   }
-  for (const tool of tools) {
+  for (const tool of catalog.filter(tool => selected(tool.name))) {
     const override = preset.tools.overrides[tool.name];
     const name = 'tool:' + tool.name;
     if (!override || override.promptEnabled === false || result.some(section => section.name === name)) continue;
@@ -241,5 +245,5 @@ export function transformPrompt(assembly, preset, catalog, definitions = new Map
   }
   result.sort((a, b) => a.name === 'preset-workshop:persona' ? -1 : b.name === 'preset-workshop:persona' ? 1 : a.order - b.order);
   const visibleSections = filterMcpSections(result.map(({ order, ...section }) => section), preset);
-  return { ...assembly, sections: visibleSections, tools };
+  return { ...assembly, sections: visibleSections };
 }

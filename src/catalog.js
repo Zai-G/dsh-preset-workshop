@@ -1,13 +1,16 @@
 import { createRequire } from 'node:module';
+import { isDeepStrictEqual } from 'node:util';
 import { readdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import yaml from 'js-yaml';
 import { createScope, scopeOf } from '@deepseek-ai/dsh-scope';
 import { BUILTINS, MCP_CLIENT_MODULE, functionSchema, sameToolSchema, fail } from './core.js';
-import { atomicJSON, readJSON } from './store.js';
+import { atomicJSON } from './store.js';
 import { mountRows } from './scope.js';
 
 const PREFIX = '@deepseek-ai/dsh-tool-';
+const PRESET_EXCLUDED = /\/(?:host|client)$/;
+const NON_TOOL_PACKAGES = new Set(['executor-native', 'executor-ptc', 'executor-testkit']);
 const TERMINALS = new Map([
   ['@deepseek-ai/dsh-tool-bash', 'bash'], ['@deepseek-ai/dsh-tool-bash-persistent', 'bash'],
   ['@deepseek-ai/dsh-tool-pwsh', 'pwsh'], ['@deepseek-ai/dsh-tool-pwsh-persistent', 'pwsh'],
@@ -22,7 +25,7 @@ export class ToolCatalog {
     function walk(rows, parents = []) {
       for (const row of rows) {
         if (typeof row.name !== 'string') continue;
-        if (row.name.startsWith(PREFIX)) {
+        if (row.name.startsWith(PREFIX) && !PRESET_EXCLUDED.test(row.name)) {
           names.add(row.name);
           // A leaf alone loses its service siblings and isolation realms.
           if (!templates.has(row.name)) templates.set(row.name, new Map());
@@ -75,10 +78,9 @@ export class ToolCatalog {
       try { for (const entry of await readdir(root)) if (entry.startsWith('dsh-tool-')) names.add('@deepseek-ai/' + entry); }
       catch (error) { this.ctx.logger.warn(`Preset Workshop package scan: ${error.message}`); }
     }
-    const known = await readJSON(join(this.root, 'catalog.json'), { tools: [] });
-    const byName = new Map(known.tools.filter(tool => !this.hiddenTools.has(tool.name)).map(tool => [tool.name, { ...tool, available: false }]));
+    const byName = new Map();
     const packages = [];
-    const orderedNames = [...names].filter(name => !this.hiddenTools.has(TERMINALS.get(name))).sort(), results = new Array(orderedNames.length);
+    const orderedNames = [...names].filter(name => !this.hiddenTools.has(TERMINALS.get(name)) && !NON_TOOL_PACKAGES.has(name.slice(PREFIX.length))).sort(), results = new Array(orderedNames.length);
     const baseline = this.ctx.systemPrompt?.assemble ? await this.ctx.systemPrompt.assemble() : undefined;
     let cursor = 0;
     const inspect = async name => {
@@ -91,12 +93,9 @@ export class ToolCatalog {
       catch (error) {
         return { name, light, available: false, row, error: error.message };
       }
-      const pkg = { name, light, available: true, row, parents: template.parents, candidates, tools: [...byName.values()].filter(tool => tool.package === name).map(tool => tool.name) };
-      if (light) {
-        try {
-          await this.discover(pkg, baseline);
-        } catch (error) { pkg.error = error.message; }
-      }
+      const pkg = { name, light, available: true, row, parents: template.parents, candidates, tools: [] };
+      try { await this.discover(pkg, baseline); }
+      catch (error) { pkg.error = error.message; }
       return pkg;
     };
     await Promise.all(Array.from({ length: Math.min(4, orderedNames.length) }, async () => {
@@ -107,10 +106,14 @@ export class ToolCatalog {
       }
     }));
     for (const pkg of results) {
-      for (const tool of pkg.entries ?? []) byName.set(tool.name, tool);
+      for (const tool of pkg.entries ?? []) {
+        const previous = byName.get(tool.name);
+        if (!previous || (tool.light && !previous.light)) byName.set(tool.name, tool);
+      }
       packages.push(pkg);
     }
     this.tools = [...byName.values()];
+    this.packages = packages;
     this.syncGlobalTools();
     byName.clear();
     for (const tool of this.tools) byName.set(tool.name, tool);
@@ -144,15 +147,36 @@ export class ToolCatalog {
       const isMcp = Boolean(mcp || schema.name.startsWith('mcp__'));
       const current = functionSchema(schema);
       const packageName = knownTool?.package;
+      const matchingProvider = this.packages.find(pkg => pkg.entries?.some(tool => tool.name === schema.name && sameToolSchema(tool.schema, current)));
+      if (matchingProvider && knownTool?.package !== matchingProvider.name) {
+        const source = matchingProvider.entries.find(tool => tool.name === schema.name);
+        byName.set(schema.name, { ...source, schema: current, available: true });
+        continue;
+      }
       // A late third-party registration must not replace a known official
       // executor just because it uses the same public tool name.
-      if (knownTool && !['thirdparty', 'mcp'].includes(knownTool.kind) && (!knownTool.schema || !sameToolSchema(knownTool.schema, current))) continue;
+      if (knownTool && !['thirdparty', 'mcp'].includes(knownTool.kind) && (!knownTool.schema || !sameToolSchema(knownTool.schema, current))) {
+        const sourcePackage = this.packages.find(pkg => pkg.name === knownTool.package);
+        if (!sourcePackage || sourcePackage.tools?.length !== 1) continue;
+        byName.set(schema.name, { ...knownTool, name: schema.name, kind: 'thirdparty', package: undefined, providerPackage: sourcePackage.name, light: true, available: true, schema: current, sections: knownTool.sections ?? ['tool:' + schema.name], prompt: knownTool.prompt ?? '' });
+        continue;
+      }
       byName.set(schema.name, { ...knownTool, name: schema.name, kind: isMcp ? 'mcp' : resource ? 'official' : packageName ? knownTool?.kind ?? 'thirdparty' : 'thirdparty', mcpServer: mcp?.serverName, package: resource ? knownTool?.package ?? '@deepseek-ai/dsh-mcp-resources' : packageName, light: knownTool?.light ?? true, available: true, schema: current, sections: knownTool?.sections ?? ['tool:' + schema.name], prompt: knownTool?.prompt ?? '' });
     }
-    const next = [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+    const next = [...byName.values()].map(tool => this.withAlternates(tool)).sort((a, b) => a.name.localeCompare(b.name));
     const changed = JSON.stringify(next) !== JSON.stringify(this.tools) || previousServers !== JSON.stringify(this.mcpServers);
     this.tools = next;
     return changed;
+  }
+  withAlternates(tool) {
+    const seen = new Set([tool.package]);
+    const alternates = this.packages.filter(pkg => pkg.available && pkg.tools?.length === 1 && pkg.tools[0] === tool.name && pkg.entries?.length === 1 && !seen.has(pkg.name))
+      .filter(pkg => !isDeepStrictEqual(pkg.entries[0].schema, tool.schema))
+      .sort((a, b) => a.name.localeCompare(b.name)).slice(0, 2).map(pkg => {
+      seen.add(pkg.name);
+      return { ...pkg.entries[0], source: pkg.name };
+    });
+    return { ...tool, ...(alternates.length ? { alternates } : {}) };
   }
   rows(packages) {
     const rows = new Map();
@@ -229,10 +253,15 @@ export class ToolCatalog {
         }
       } catch (error) { pkg.error = error.message; throw error; }
     }
+    this.tools = this.tools.map(tool => this.withAlternates(tool));
   }
   forPreset(preset) {
     const tools = new Map(this.tools.map(tool => [tool.name, tool]));
     for (const pkg of this.packages) if (!pkg.light && preset.tools.packages.includes(pkg.name)) for (const tool of pkg.entries ?? []) tools.set(tool.name, tool);
-    return [...tools.values()];
+    for (const [name, source] of Object.entries(preset.tools.sources ?? {})) {
+      const tool = this.packages.find(pkg => pkg.name === source)?.entries?.find(entry => entry.name === name);
+      if (tool && preset.tools.packages.includes(source)) tools.set(name, tool);
+    }
+    return [...tools.values()].map(tool => this.withAlternates(tool));
   }
 }

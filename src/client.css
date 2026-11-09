@@ -420,6 +420,14 @@ input::placeholder,textarea::placeholder {
 .switch input:checked+.track {
   background:var(--dsw-alias-brand-primary)
 }
+:host-context([data-ds-dark-theme]) .switch .track {
+  background:color-mix(in srgb,var(--dsw-static-neutral-00) 22%,var(--dsw-alias-bg-base));
+  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--dsw-static-neutral-00) 22%,transparent)
+}
+:host-context([data-ds-dark-theme]) .switch input:checked+.track {
+  background:var(--dsw-alias-state-success-primary);
+  box-shadow:none
+}
 .switch input:checked+.track:after {
   transform:translateX(16px)
 }
@@ -1372,6 +1380,11 @@ h3 {
   cursor:help;
   line-height:1;
   outline:none
+}
+.label-inline>.tooltip-wrap,.prompt-card-head>.tooltip-wrap {
+  flex:none;
+  align-self:center;
+  vertical-align:middle
 }
 .tooltip {
   position:absolute;
@@ -2942,6 +2955,7 @@ dialog[open] {
 .tool-group[open]>.tool-group-head .chevron { transform:rotate(90deg) }
 .tool-group .tools-grid,.tool-group .bounded-list { gap:8px; padding:0; border:0; border-radius:0; background:transparent }
 .tool-group .tool-card { border:1px solid var(--dsw-alias-border-l1); border-radius:9px; background:var(--dsw-alias-bg-layer-1) }
+.tool-card .source-note { display:block; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; line-height:14px }
 
 /* Enabled / current state reads as full black; off or collapsed reads muted. */
 .tool-card.off .text-button { color:color-mix(in srgb,var(--dsw-alias-label-secondary) 82%,transparent) }
@@ -2968,7 +2982,7 @@ dialog[open] {
 .tooltip-wrap>.tooltip.variable-tooltip { max-height:min(340px,calc(100vh - 80px)); overflow:auto }
 
 /* Round 9: the hint icon hugs the label it explains. */
-.prompt-card-head>.tooltip-wrap { margin-left:-9px }
+.prompt-card-head>.tooltip-wrap,.prompt-card-head .persona-variable-hint { margin-left:-9px }
 .tool-group .bounded-list { max-height:none; overflow:visible; overscroll-behavior:auto }
 .tool-group .bounded-list.is-capped { overflow-y:auto; overscroll-behavior:auto; scrollbar-gutter:stable }
 

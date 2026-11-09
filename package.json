@@ -1,6 +1,6 @@
 {
   "name": "dsh-preset-workshop",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Preset Workshop · 预设工坊：让您的每一个Agent都有自己的工作方式",
   "type": "module",
   "license": "Apache-2.0",
@@ -45,7 +45,7 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.4",
-    "@deepseek-ai/dsh-scope": ">=v0.2.1-rc.5"
+    "@deepseek-ai/dsh-scope": ">=v0.2.2-rc.1"
   },
   "dsh": {
     "bundle": {

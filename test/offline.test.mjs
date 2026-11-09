@@ -1,6 +1,7 @@
 import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
 import assert from 'node:assert/strict';
+import * as core from '../src/core.js';
 // The standalone reference page is a local artifact that git does not track, so default to the
 // repo copy and skip instead of failing when neither the env var nor the file exists.
 const referencePath=process.env.STUDIO_REFERENCE_HTML??new URL('../预设工坊交互预览.html',import.meta.url);
@@ -14,7 +15,7 @@ for(const [all,attrs,code]of executable)new vm.Script(code);
 vm.runInContext(executable[0][2],context);vm.runInContext(executable[1][2],context);
 vm.runInContext(`
 let snap=api({action:'snapshot'}); if(snap.presets.length!==1)throw Error('initial presets');
-let first=api({action:'preview',id:BUILTIN_ID}); if(first.tools.filter(t=>!t.function.name.startsWith('mcp__')).length!==9||first.tools.some(t=>t.function.name==='subagent')||!first.displayPrompt.includes('\\n\\nwrite：'))throw Error('preview tool format');
+let first=api({action:'preview',id:BUILTIN_ID}); if(first.tools.filter(t=>!t.function.name.startsWith('mcp__')).map(t=>t.function.name).sort().join()!=='ask_user_question,bash,edit,read,todo_write,web_fetch,web_search,write'||first.tools.some(t=>t.function.name==='subagent')||!first.displayPrompt.includes('\\n\\nwrite：'))throw Error('preview tool format');
 api({action:'create',id:'example',name:'Example'});
 const fresh=preset('example');api({action:'save',id:fresh.id,revision:fresh.revision,changes:{prompt:{persona:'Demo {{cwd}}',sections:{}}}});
 if(!preview({id:fresh.id}).displayPrompt.startsWith('# System\\n\\nDemo /workspace/example'))throw Error('variable');
@@ -36,4 +37,14 @@ api({action:'import',format:'json',mode:'rename',text:exported,renames:[{index:0
 const yamlExport=api({action:'export',all:true,format:'yaml'}).text;if(!yamlExport.includes('dsh-preset-workshop'))throw Error('yaml export');
 `,context);
 assert.ok(!/\/Users\/[^/]+\//.test(html)&&!html.includes('http://127.0.0.1:'));
+const mockSource=await readFile(new URL('../tools/offline-mock.js',import.meta.url),'utf8');
+const previewSource=mockSource.slice(0,mockSource.indexOf('// ------------------------------------------------------------------- shared'))+'globalThis.__preview=preview;';
+const freshContext=vm.createContext({...core,structuredClone,localStorage:{getItem:()=>null,setItem(){},removeItem(){}},document:{getElementById:id=>data.get(id)||{textContent:''}}});
+freshContext.validatePreset=(input,previous,all,roster,catalog)=>core.validatePreset(input,previous,all,roster,structuredClone(catalog));
+vm.runInContext(previewSource,freshContext);
+vm.runInContext("globalThis.__schemaOverride=structuredClone(catalog.find(tool=>tool.name==='read').schema);globalThis.__schemaOverride.function.description='OFFLINE SCHEMA OVERRIDE';",freshContext);
+const fresh=vm.runInContext(`(()=>{const current=preset(BUILTIN_ID);return __preview({id:BUILTIN_ID,draft:{tools:{...current.tools,enabled:['read'],overrides:{read:{schema:__schemaOverride,prompt:'OFFLINE PROMPT OVERRIDE'}}}}})})()`,freshContext);
+assert.equal(fresh.tools.map(tool=>tool.function.name).join(), 'read');
+assert.equal(fresh.tools[0].function.description,'OFFLINE SCHEMA OVERRIDE');
+assert.ok(fresh.prompt.includes('OFFLINE PROMPT OVERRIDE')&&!fresh.prompt.includes('Write text to a file'));
 console.log('PASS: standalone scripts parse; offline preview, variables, injected sections, save, JSON conflicts/rename and YAML export work without DSH');
