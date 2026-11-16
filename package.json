@@ -1,6 +1,6 @@
 {
   "name": "dsh-preset-workshop",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Preset Workshop · 预设工坊：让您的每一个Agent都有自己的工作方式",
   "type": "module",
   "license": "Apache-2.0",
@@ -24,28 +24,34 @@
     "access": "public"
   },
   "exports": {
-    ".": "./src/index.js",
-    "./scope": "./src/scope.js",
-    "./client": "./src/client.js",
+    ".": "./lib/service/index.js",
+    "./scope": "./lib/runtime/scope.js",
+    "./client": "./lib/client/client.js",
     "./package.json": "./package.json"
   },
   "files": [
-    "src",
+    "lib",
     "cordis.patch.yml",
     "README.md",
     "assets"
   ],
   "scripts": {
-    "test": "node --test test/core.test.mjs test/client.test.mjs test/css.test.mjs",
-    "check": "node --check src/index.js && node --check src/scope.js && node --check src/core.js && node --check src/store.js && node --check src/catalog.js && node --check src/mcp.js && node --check src/client.js",
-    "test:offline": "node test/offline.test.mjs"
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.core.json && node tools/build-client.mjs"
   },
   "dependencies": {
+    "fflate": "^0.8.3",
     "js-yaml": "^4.1.0"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.1.0",
+    "@deepseek-ai/dsh-scope": "^0.2.2-rc.2",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.4",
-    "@deepseek-ai/dsh-scope": ">=v0.2.2-rc.1"
+    "@deepseek-ai/dsh-scope": ">=v0.2.2-rc.2"
   },
   "dsh": {
     "bundle": {

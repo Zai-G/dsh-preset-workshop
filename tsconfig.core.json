@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "noImplicitAny": true
+  },
+  "include": ["src/domain/**/*.ts", "src/history/**/*.ts", "src/storage/**/*.ts", "src/transfer/**/*.ts"]
+}

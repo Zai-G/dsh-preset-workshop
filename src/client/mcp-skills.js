@@ -1,0 +1,51 @@
+      function mcp() {
+        const list = $('mcp-list'), scrollTop = list.scrollTop, expanded = new Set([...list.querySelectorAll('.mcp-server[open]')].map(server => server.dataset.serverName)), toolScroll = new Map([...list.querySelectorAll('.mcp-server')].map(server => [server.dataset.serverName, server.querySelector('.mcp-tools')?.scrollTop ?? 0]));
+        const rows = [...(preview?.mcp || [])].sort((a, b) => (a.source === 'preset') - (b.source === 'preset'));
+        $('mcp-summary').textContent = rows.length ? t(`${rows.length} 个 MCP 服务`, `${rows.length} MCP services`) : t('未发现 MCP 服务', 'No MCP services detected');
+        $('mcp-list').innerHTML = rows.length ? rows.map(server => {
+          const selected = server.tools.filter(tool => draft.tools.enabled.includes(tool.function?.name ?? tool.name)).length;
+          const label = server.source === 'unknown' ? t('来源未识别', 'Unidentified source') : (server.serverName || t('未知服务', 'Unknown service'));
+          const enabled = server.source === 'preset' ? (draft.mcp || []).find(item => item.serverName === server.serverName)?.enabled !== false : draft.mcpEnabled?.[server.serverName] !== false;
+          const lock = selected > 0, unknown = server.source === 'unknown';
+          const connection = server.connection?.state, connectionLabel = !enabled ? t('已关闭', 'Disabled') : connection === 'connecting' ? t('连接中…', 'Connecting…') : connection === 'timeout' ? t('连接超时', 'Connection timed out') : connection === 'error' ? t('连接失败，请检查配置', 'Connection failed; check configuration') : connection === 'unsaved' ? t('保存后连接', 'Connects after saving') : `${selected}/${server.tools.length}`;
+          const actions = `<div class="mcp-service-controls"><button type="button" class="text-button" data-mcp-preview="${esc(server.serverName)}">${icon('eye')}${t('预览', 'Preview')}</button>${server.source === 'preset' ? `<span class="mcp-actions"><button type="button" class="icon-button ghost" data-mcp-edit="${esc(server.serverName)}" aria-label="${esc(t('编辑 MCP 服务', 'Edit MCP service'))}" title="${esc(t('编辑', 'Edit'))}">${icon('edit')}</button><button type="button" class="icon-button ghost danger" data-mcp-delete="${esc(server.serverName)}" aria-label="${esc(t('删除 MCP 服务', 'Delete MCP service'))}" title="${esc(t('删除', 'Delete'))}">${icon('trash')}</button></span>` : ''}${!unknown ? `<label class="switch" title="${esc(lock ? t('先关闭该服务的全部工具，才能切换服务开关。', 'Disable all tools from this service before switching it.') : t('仅影响当前预设', 'Affects this preset only'))}"><input type="checkbox" data-mcp-enabled="${esc(server.serverName)}" aria-label="${esc(t('启用 MCP：', 'Enable MCP: ') + label)}" ${enabled ? 'checked' : ''} ${lock ? 'disabled' : ''}><span class="track"></span></label>` : ''}</div>`;
+          return `<details class="mcp-server${enabled ? '' : ' off'}" data-server-name="${esc(server.serverName)}"><summary><span>${esc(label)}</span><small class="muted">${server.source === 'preset' ? t('当前工具', 'Current tool') : unknown ? t('未识别', 'Unidentified') : t('环境', 'Environment')} · ${esc(connectionLabel)}</small><svg class="icon chevron"><use href="#i-chevron"/></svg></summary>${actions}<div class="mcp-tools">${server.tools.length ? server.tools.map(tool => { const schema = tool.function ? tool : { type: 'function', function: tool }, definition = schema.function; return toolCard({ name: definition.name, kind: 'mcp', mcpServer: server.serverName, available: enabled, serverDisabled: !enabled, unavailable: Boolean(definition.unavailable), light: true, schema: definition.unavailable ? undefined : schema }); }).join('') : `<span class="muted">${t(enabled ? '尚未发现工具，可在预览中检测。' : '开启服务后检测工具。', enabled ? 'No tools yet; detect them in Preview.' : 'Enable the service to detect tools.')}</span>`}</div></details>`;
+        }).join('') : `<div class="empty-state">${icon('cloud')}<span>${t('扫描后会显示全局 MCP；新建的 MCP 仅属于当前预设。', 'Global MCP services appear after scanning. New services belong only to this preset.')}</span></div>`;
+        for (const server of list.querySelectorAll('.mcp-server')) { server.open = expanded.has(server.dataset.serverName); server.querySelector('.mcp-tools').scrollTop = toolScroll.get(server.dataset.serverName) ?? 0; }
+        list.scrollTop = scrollTop;
+      }
+      function skills() {
+        const all = [...sourceSkills];
+        for (const name of [...draft.skills, ...(state.config.skillGroups || []).flatMap(group => group.skills)]) if (!all.some(skill => skill.name === name)) all.push({ name, description: t('未在当前目录发现；保存的绑定仍保留。', 'Not found in this directory; the saved selection is preserved.') });
+        if (skillGroupId !== 'all' && !state.config.skillGroups?.some(row => row.id === skillGroupId)) skillGroupId = 'all';
+        const group = state.config.skillGroups?.find(row => row.id === skillGroupId), shown = skillGroupId === 'all' ? all : all.filter(skill => group?.skills.includes(skill.name));
+        $('skill-list').innerHTML = shown.length ? shown.map(skill => `<div class="skill-row${draft.skills.includes(skill.name) ? '' : ' off'}">${icon('skill')}<div class="skill-copy"><p>${esc(skill.name)}</p><small class="skill-description" title="${esc(skill.description)}">${esc(skill.description)}</small><button type="button" class="text-button" data-skill-detail="${esc(skill.name)}">${t('查看详细', 'View details')} ${icon('chevron')}</button></div><label class="switch"><input type="checkbox" data-skill="${esc(skill.name)}" aria-label="${esc(t('绑定 ', 'Select ') + skill.name)}" ${draft.skills.includes(skill.name) ? 'checked' : ''}><span class="track"></span></label></div>`).join('') : `<div class="empty-state">${icon('skill')}<span>${t(skillGroupId === 'all' ? '未发现技能' : '此分组中没有技能', skillGroupId === 'all' ? 'No skills detected' : 'No skills in this group')}</span></div>`;
+        if (preview?.skillWarnings?.length) $('skill-list').insertAdjacentHTML('beforeend', `<p class="unavailable">${esc(t('以下绑定尚未进入 AI 上下文，请检查来源后重试：', 'These selected skills could not enter the AI context; check their sources and retry: ') + preview.skillWarnings.join('、'))}</p>`);
+        if (!completeSkills) $('skill-list').insertAdjacentHTML('beforeend', `<p class="unavailable">${t('技能目录扫描尚未完整，现有选择已保留。', 'Skill discovery is incomplete. Existing selections are preserved.')}</p>`);
+        const allSelected = shown.length > 0 && shown.every(skill => draft.skills.includes(skill.name));
+        $('skills-all').hidden = !shown.length;
+        $('skills-all').textContent = t(allSelected ? '全不选' : '全选', allSelected ? 'Deselect all' : 'Select all');
+        $('skill-group-select').innerHTML = `<span class="choice-name">${esc(group?.name ?? t('全部', 'All'))}</span>${icon('down')}`;
+        const count = id => id === 'all' ? all.length : all.filter(skill => state.config.skillGroups.find(row => row.id === id)?.skills.includes(skill.name)).length;
+        $('skill-group-menu').innerHTML = '<div class="skill-group-options"><div class="skill-group-option-row"><button type="button" class="select-option skill-group-option" role="option" data-skill-group="all" aria-selected="' + (skillGroupId === 'all') + '"><span class="choice-name">' + t('全部', 'All') + '</span><span class="group-count">' + count('all') + '</span></button><span class="group-action"></span></div>' + (state.config.skillGroups || []).map(row => '<div class="skill-group-option-row"><button type="button" class="select-option skill-group-option" role="option" data-skill-group="' + esc(row.id) + '" aria-selected="' + (skillGroupId === row.id) + '"><span class="choice-name">' + esc(row.name) + '</span><span class="group-count">' + count(row.id) + '</span></button><button type="button" class="icon-button ghost" data-skill-group-edit="' + esc(row.id) + '" aria-label="' + esc(t('编辑分组 ', 'Edit group ') + row.name) + '">' + icon('edit') + '</button></div>').join('') + '</div><button type="button" class="select-option skill-group-new" data-skill-group-new>' + icon('plus') + '<span>' + t('新建', 'New') + '</span></button>';
+      }
+      function editSkillGroup(group) {
+        const all = [...sourceSkills.map(skill => skill.name), ...draft.skills, ...(group?.skills || [])].filter((name, index, items) => items.indexOf(name) === index).sort();
+        const rows = all.map(name => `<label class="group-skill-choice"><input type="checkbox" data-group-skill="${esc(name)}" ${group?.skills.includes(name) ? 'checked' : ''}><span>${esc(name)}</span></label>`).join('') || `<p class="empty-state">${t('尚未发现技能', 'No skills detected')}</p>`;
+        dialog(group ? t('编辑分组', 'Edit group') : t('新建技能分组', 'New skill group'), t('分组仅筛选列表，不改变任何预设的技能绑定。', 'Groups filter this list and do not change preset skill selections.'), `${group ? `<input type="hidden" id="group-id" value="${esc(group.id)}">` : ''}<label class="field">${t('名称', 'Name')}<input id="group-name" maxlength="80" required value="${esc(group?.name || '')}"></label><div class="group-skill-list">${rows}</div>${dialogError}`, async () => {
+          const skills = [...root.querySelectorAll('[data-group-skill]:checked')].map(input => input.dataset.groupSkill), result = await request('skill-group-save', { ...(group ? { id: group.id, previous: group } : {}), name: $('group-name').value, skills });
+          state = result;
+          if (!group) skillGroupId = state.config.skillGroups.at(-1)?.id ?? 'all';
+          else skillGroupId = group.id;
+          skillsViewAfterGroup();
+        }, t('保存', 'Save'), group ? `<button type="button" class="danger" data-skill-group-delete="${esc(group.id)}">${icon('trash')}${t('删除分组', 'Delete group')}</button>` : '', { lockOnEdit: true });
+        if (group) root.querySelector('[data-skill-group-delete]').onclick = () => submitDialog(async () => {
+          const result = await request('skill-group-delete', { id: group.id, previous: group });
+          state = result; skillGroupId = 'all'; skills();
+          showUndoToast(t('已删除 ', 'Deleted ') + group.name, result.undo.expiresAt, async () => {
+            state = await request('skill-group-undo', { token: result.undo.token }); skills();
+          });
+        });
+      }
+      function skillsViewAfterGroup() { skills(); toast(t('技能分组已保存。', 'Skill group saved.')); }
+
